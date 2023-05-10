@@ -17,6 +17,30 @@ You can use the file 'requirements.txt' to install them.
 pip3 install -r requirements.txt
 ```
 
+## Enable exporting of progress trace to a file in csv format
+
+This configuration is a good starting point to export progress trace.
+```
+<config xmlns="http://tail-f.com/ns/config/1.0">
+  <progress xmlns="http://tail-f.com/ns/progress">
+    <trace>
+      <name>minimal-recommended-progress-trace-config</name>
+      <destination>
+        <file>progress-trace.csv</file>
+        <format>csv</format>
+      </destination>
+      <enabled>true</enabled>
+      <verbosity>very-verbose</verbosity>
+    </trace>
+  </progress>
+</config>
+```
+
+It is easiest loaded into NSO using the ncs_load command.
+```
+❯ ncs_load -lm progress-trace.xml
+```
+
 ## Tools
 
 ### ncs_progress_trace_viewer
