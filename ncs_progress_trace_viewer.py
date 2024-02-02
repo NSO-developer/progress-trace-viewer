@@ -167,7 +167,10 @@ def graph_progress_trace(args, f, events):
             if writer:
                 writer.write(line)
             l = list(csv.reader([line]))[0]
-            if len(l) == 18:
+            if len(l) == 17:
+                have_trace_id = -6
+                have_span_id = 3
+            elif len(l) == 18:
                 have_trace_id = -1
                 have_span_id = 0
             elif len(l) == 19:
