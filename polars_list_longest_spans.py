@@ -33,7 +33,12 @@ def main(args):
 
     pl.Config().set_tbl_rows(1000)
 
-    data = progress_trace.select(['MESSAGE', 'DURATION', 'TRANSACTION ID']).sort('DURATION', descending=True).collect()
+    data = progress_trace.select([
+        'MESSAGE',
+        'DURATION',
+        'TRANSACTION ID',
+        'ATTRIBUTE VALUE'
+        ]).sort('DURATION', descending=True).collect()
 
     print(data)    
 if __name__ == '__main__':

@@ -15,20 +15,14 @@ def parseArgs(args):
 
 
 def get_statistics(progress_trace, datastore='running'):
-    if datastore == '':
-        d = progress_trace.filter((pl.col('DATASTORE') == '') &
-                    (pl.col('EVENT TYPE') == 'stop') &
-                    ~(pl.col('MESSAGE').str.starts_with('check conflict'))
-        )
-    else:
-        d = progress_trace.filter((pl.col('DATASTORE') == datastore) &
-                    (pl.col('EVENT TYPE') == 'stop') &
-                    ~(pl.col('MESSAGE').str.starts_with('check conflict'))
-        )
+    d = progress_trace.filter((pl.col('DATASTORE') == datastore) &
+                (pl.col('EVENT TYPE') == 'stop') &
+                ~(pl.col('MESSAGE').str.starts_with('check conflict'))
+    )
 
 
     duration_grouped_by_message = d.group_by('MESSAGE').agg([
-                    pl.col('DURATION').len().alias('COUNT'),
+                    pl.col('MESSAGE').len().alias('COUNT'),
                     pl.col('DURATION').sum().alias('SUM'),
                     pl.col('DURATION').std().alias('STD'),
                     pl.col('DURATION').mean().alias('MEAN'),
@@ -48,10 +42,10 @@ def main(args):
 
     print("=== RUNNING ===")
     print(get_statistics(progress_trace))
-    print("\n=== NO DATASTORE ===")
-    print(get_statistics(progress_trace, ''))
-    print("\n=== OPERATIONAL ===")
-    print(get_statistics(progress_trace, 'operational'))
+#    print("\n=== NO DATASTORE ===")
+#    print(get_statistics(progress_trace, ''))
+#    print("\n=== OPERATIONAL ===")
+#    print(get_statistics(progress_trace, 'operational'))
 
 if __name__ == '__main__':
     main(parseArgs(sys.argv[1:]))
