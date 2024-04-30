@@ -34,9 +34,15 @@ def main(args):
 
     pl.Config().set_tbl_rows(1000)
 
-    data = progress_trace.select(['MESSAGE', 'EVENT TYPE', 'DURATION',
-                                  'TRANSACTION ID', 'ATTRIBUTE NAME',
-                                  'ATTRIBUTE VALUE']).sort('DURATION',
+    data = progress_trace.select([
+        'MESSAGE',
+        'DURATION',
+        'SPAN ID',
+        'TRANSACTION ID',
+        'CONTEXT',
+        'ATTRIBUTE NAME',
+        'ATTRIBUTE VALUE'
+        ]).sort('DURATION',
                                  descending=True).collect()
 
     print(data)    

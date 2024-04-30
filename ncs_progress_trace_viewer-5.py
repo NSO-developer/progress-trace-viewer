@@ -42,8 +42,10 @@ def parseArgs(args):
             help='Filter on transaction id.')
     parser.add_argument('--write', type=str,
             help='Write the progress trace events to file.')
-    parser.add_argument('--interactive', action='store_true', default=False,
+    parser.add_argument('--realtime', action='store_true', default=False,
             help='Skip view updates and sleeps during parsing.')
+    parser.add_argument('--speedup', type=int, default=1,
+            help='Speedup realtime view n times.')
     return parser.parse_args(args)
 
 
@@ -104,9 +106,12 @@ def read_events(filename):
 
 def get_table(tids = None, span_header="Span"):
     table = Table(title="NSO Traces")
+    table.add_column("Time", max_width=8, justify="right", no_wrap=True)
     table.add_column("Event", min_width=20, no_wrap=True)
+    table.add_column("Context", max_width=20, no_wrap=True)
+    table.add_column("Device", max_width=20, no_wrap=True)
     table.add_column("TId", min_width=3, no_wrap=True)
-    table.add_column("Duration", min_width=10, no_wrap=True)
+    table.add_column("Duration", min_width=10, justify="right", no_wrap=True)
     table.add_column(span_header, width=120, no_wrap=True)
     if tids is not None:
         for tid, spans in tids.items():
@@ -138,7 +143,7 @@ def graph_progress_trace(args, f, events):
         else:
             args.tid = [ args.tid ]
 
-    def new_span(text, key, tid):
+    def new_span(text, key, tid, ts='', ctx='', dev=''):
         if tid not in tids_color:
             color=get_color()
             tids_color[tid] = color
@@ -152,89 +157,102 @@ def graph_progress_trace(args, f, events):
             tids[tid] = [(text, d, span)]
         else:
             tids[tid].append((text, d, span))
-        table.add_row(text, tid, d, span)
+        table.add_row(ts, text, ctx, dev, tid, d, span)
 
     def end_span(key, duration):
         s, d = spans[key]
-        d.append(f'{duration*1000:0.3f}')
+        
+        d.append(f'{duration:0.3f}')
         s.end = size
         if key in spans_running:
             del spans_running[key]
 
     with Live(table) as live:
         header = None
-        for line in f:
-            if writer:
-                writer.write(line)
-            l = list(csv.reader([line]))[0]
-            if len(l) == 17:
-                have_trace_id = -6
-                have_span_id = 3
-            elif len(l) == 18:
-                have_trace_id = -1
-                have_span_id = 0
-            elif len(l) == 19:
-                have_trace_id = 0
-                have_span_id = 0
-            elif len(l) == 21:
-                have_trace_id = 2
-                have_span_id = 3
-            else:
-                print("ERROR: Unsupported number of columns in progress trace"+
-                     f"{len(l)}")
-            if header is None:
-                if l[0] == 'EVENT TYPE':
-                    header = l
-                    continue
+        n = 1
+        ts1 = 0
+        try:
+            for line in f:
+                n += 1
+                if writer:
+                    writer.write(line)
+                l = list(csv.reader([line]))[0]
+                if len(l) == 17:
+                    have_trace_id = -6
+                    have_span_id = 3
+                elif len(l) == 18:
+                    have_trace_id = -1
+                    have_span_id = 0
+                elif len(l) == 19:
+                    have_trace_id = 0
+                    have_span_id = 0
+                elif len(l) == 21:
+                    have_trace_id = 2
+                    have_span_id = 3
                 else:
-                    header = 'No header.'
-            if not args.o and l[5+have_span_id] == 'operational':
-                continue
-            if events is not None and l[17+have_trace_id] not in events:
-                continue
-            tag = l[0]
-            ts = datetime.fromisoformat(l[1]).timestamp()
-            duration = float(l[2]) if l[2] else 0.0
-            tid = l[4+have_span_id]
-            key = '-'.join([tid]+l[11+have_trace_id:18+have_trace_id])
-            text = l[17+have_trace_id]
+                    print("ERROR: Unsupported number of columns in progress trace"+
+                         f"{len(l)}")
+                if header is None:
+                    if l[0] == 'EVENT TYPE':
+                        header = l
+                        continue
+                    else:
+                        header = 'No header.'
+                if not args.o and l[5+have_span_id] == 'operational':
+                    continue
+                if events is not None and l[17+have_trace_id] not in events:
+                    continue
+                tag = l[0]
+                ts = datetime.fromisoformat(l[1]).timestamp()
+                duration = float(l[2]) if l[2] else 0.0
+                sid = l[3+have_span_id]
+                tid = l[4+have_span_id]
+                key = '-'.join([sid, tid]+l[11+have_trace_id:18+have_trace_id])
+                text = l[17+have_trace_id]
+                ctx = l[6]
+                dev = l[14+have_trace_id]
 
-            if args.tid and tid not in args.tid:
-                continue
+                if args.tid and tid not in args.tid:
+                    continue
 
-            if begin == 0.0:
-                begin = ts
-                last = ts
-            size = ts-begin
-            if tag == 'start':
-                new_span(text, key, tid)
-            elif tag == 'stop' and key in spans:
-                end_span(key, duration)
-                if text == 'grabbing transaction lock':
+                if begin == 0.0:
+                    begin = ts
+                    last = ts
+                size = ts-begin
+                if tag == 'start':
+                    if ts1 == 0: ts1=ts
+                    new_span(text, key, tid, ts=str(int(ts-ts1)), ctx=ctx, dev=dev)
+                elif tag == 'stop' and key in spans:
+                    end_span(key, duration)
+                    if text == 'grabbing transaction lock':
+                        ftext = 'holding transaction lock'
+                        fkey = tid+'-'+ftext
+                        new_span(ftext, fkey, tid, ts=str(int(ts-ts1)), ctx=ctx, dev=dev)
+                        held_locks[tid] = ts
+                elif tag == 'info' and text == 'releasing transaction lock':
                     ftext = 'holding transaction lock'
                     fkey = tid+'-'+ftext
-                    new_span(ftext, fkey, tid)
-                    held_locks[tid] = ts
-            elif tag == 'info' and text == 'releasing transaction lock':
-                ftext = 'holding transaction lock'
-                fkey = tid+'-'+ftext
-                if fkey in spans:
-                    sts = held_locks.pop(tid)
-                    fduration = ts-sts
-                    end_span(fkey, fduration)
-            for s, d in spans.values():
-                s.size = size
-            for s in spans_running.values():
-                s.end = size
-            span_duration.plain = f'Span {size*1000:0.3f} ms'
-            if (args.follow or last-ts>0.1) and args.interactive:
-                live.refresh()
-            if not args.follow and args.interactive and last:
-                delay = ts-last
-                if delay > 0:
-                    time.sleep(delay)
-            last = ts
-        live.refresh()
+                    if fkey in spans:
+                        sts = held_locks.pop(tid)
+                        fduration = ts-sts
+                        end_span(fkey, fduration)
+                for s, d in spans.values():
+                    s.size = size
+                for s in spans_running.values():
+                    s.end = size
+                span_duration.plain = f'Span {size:0.3f} s'
+                if (args.follow or last-ts>0.1) and args.realtime:
+                    live.refresh()
+                if not args.follow and args.realtime and last:
+                    delay = ts-last
+                    if delay > 0:
+                        time.sleep(delay/args.speedup)
+                last = ts
+            live.refresh()
+        except Exception as e:
+            print(f"ERROR: At line {n}")
+            print(e)
+
 
 
 def main(args):

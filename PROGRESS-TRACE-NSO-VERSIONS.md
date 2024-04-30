@@ -22,3 +22,16 @@ The goal is give better insight what NSO is doing and to be compatible with Open
 | 6.0         |                                                                                                                                                                                                               | 19          |                                                                                                          |
 | 6.1         | New columns: SPAN ID, PARENT SPAN ID, ATTRIBUTE NAME, ATTRIBUTE VALUE, LINK TRACE ID, LINK SPAN ID.<br> Removed columns: PHASE, SERVICE, SERVICE PHASE, COMMIT QUEUE ID, NODE, DEVICE, DEVICE PHASE, PACKAGE. | 17          | Introduction of traces.                                                                                                         |
 | 6.2         |                                                                                                                                                                                                               | 17          |                                                                                                          |
+
+
+
+# CDB lock
+
+## 5.7
+
+'stop' + 'grabbing transaction lock' -> 'info', 'releasing transaction lock'
+
+
+## 6.x
+
+'start' + 'grabbing transaction lock' -> 'info', 'grabbing transaction lock'
