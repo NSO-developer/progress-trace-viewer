@@ -7,6 +7,7 @@ import os
 import sys
 import time
 
+import polars as pl
 from rich.live import Live
 from rich.bar import Bar
 from rich.console import Group
@@ -39,13 +40,21 @@ def parseArgs(args):
     parser.add_argument('--filter', type=str,
             help='Read events to filter from file.')
     parser.add_argument('--tid', type=str,
-            help='Filter on transaction id.')
+            help='Filter on transaction id(s).')
+    parser.add_argument('--ctid', type=str,
+            help='Color transaction id(s).')
+    parser.add_argument('-b', '--begin', type=str,
+            help='Start timestamp')
+    parser.add_argument('-e', '--end', type=str,
+            help='End timestamp')
     parser.add_argument('--write', type=str,
             help='Write the progress trace events to file.')
     parser.add_argument('--realtime', action='store_true', default=False,
             help='Skip view updates and sleeps during parsing.')
     parser.add_argument('--speedup', type=int, default=1,
             help='Speedup realtime view n times.')
+    parser.add_argument('-t', '--timestamp', action='store_true', default=False,
+            help='Show start timestamp.')
     return parser.parse_args(args)
 
 
@@ -104,55 +113,54 @@ def read_events(filename):
     return events
 
 
-def get_table(tids = None, span_header="Span"):
+def get_table(span_header="Span", rel_time = True):
     table = Table(title="NSO Traces")
-    table.add_column("Time", max_width=8, justify="right", no_wrap=True)
+    if rel_time:
+        table.add_column("Time", max_width=8, justify="right", no_wrap=True)
+    else:
+        table.add_column("Timestamp", max_width=28, justify="right", no_wrap=True)
     table.add_column("Event", min_width=20, no_wrap=True)
     table.add_column("Context", max_width=20, no_wrap=True)
     table.add_column("Device", max_width=20, no_wrap=True)
     table.add_column("TId", min_width=3, no_wrap=True)
     table.add_column("Duration", min_width=10, justify="right", no_wrap=True)
     table.add_column(span_header, width=120, no_wrap=True)
-    if tids is not None:
-        for tid, spans in tids.items():
-            for text, d, span in spans:
-                table.add_row(f'{text} {tid}', d, span)
     return table
 
 
 def graph_progress_trace(args, f, events):
     begin = 0.0
-    size = 0.0
+    elapsed = 0.0
     last = 0.0
 
     bars = Group()
-    spans = {}
+    all_spans = []
+    open_spans = {}
     tids = {}
     tids_color = {}
-    spans_running = {}
     held_locks = {}
     span_duration = Text(" Span 0.0 ms")
-    table = get_table(span_header=span_duration)
+    table = get_table(span_header=span_duration, rel_time=not args.timestamp)
 
     writer = None
     if args.write:
         writer = open(args.write, 'w')
     if args.tid:
-        if ',' in args.tid:
-            args.tid = args.tid.split(',')
-        else:
-            args.tid = [ args.tid ]
+        args.tid = args.tid.split(',')
 
     def new_span(text, key, tid, ts='', ctx='', dev=''):
         if tid not in tids_color:
-            color=get_color()
+            if not args.ctid or tid in args.ctid:
+                color=get_color()
+            else:
+                color=Color.from_ansi(1)
             tids_color[tid] = color
         else:
             color=tids_color[tid]
-        span = Bar(begin=size, end=size, size=size, color=color)
-        spans_running[key] = span
+        span = Bar(begin=elapsed, end=elapsed, size=elapsed, color=color)
         d = Text('')
-        spans[key] = span, d
+        open_spans[key] = span, d
+        all_spans.append(span)
         if tid not in tids:
             tids[tid] = [(text, d, span)]
         else:
@@ -160,12 +168,13 @@ def graph_progress_trace(args, f, events):
         table.add_row(ts, text, ctx, dev, tid, d, span)
 
     def end_span(key, duration):
-        s, d = spans[key]
-        
+        s, d = open_spans[key]
         d.append(f'{duration:0.3f}')
-        s.end = size
-        if key in spans_running:
-            del spans_running[key]
+        s.end = elapsed
+        if key in open_spans:
+            del open_spans[key]
+
+    
 
     with Live(table) as live:
         header = None
@@ -198,51 +207,86 @@ def graph_progress_trace(args, f, events):
                         continue
                     else:
                         header = 'No header.'
+                # Skip operational data if not included
                 if not args.o and l[5+have_span_id] == 'operational':
                     continue
+                # Use events filter if provided
                 if events is not None and l[17+have_trace_id] not in events:
                     continue
+
                 tag = l[0]
                 ts = datetime.fromisoformat(l[1]).timestamp()
                 duration = float(l[2]) if l[2] else 0.0
                 sid = l[3+have_span_id]
                 tid = l[4+have_span_id]
-                key = '-'.join([sid, tid]+l[11+have_trace_id:18+have_trace_id])
-                text = l[17+have_trace_id]
                 ctx = l[6]
                 dev = l[14+have_trace_id]
+                msg = l[17+have_trace_id]
+                ann = l[18+have_trace_id]
+                
+                key = '-'.join([sid, tid]+l[11+have_trace_id:18+have_trace_id])
 
+                # Filter on transaction id if provided
                 if args.tid and tid not in args.tid:
                     continue
+                # Filter out message were not interested in (don't know yet what this is)
+                if tid == '-1': 
+                    continue
+                # Filter on time range if provided
+                if args.begin and ts < args.begin:
+                    continue
+                if args.end and ts > args.end:
+                    continue
 
+                if msg == 'grabbing transaction lock':
+                    msg = 'waiting for transaction lock'
+
+                # Calculate elapsed time
                 if begin == 0.0:
                     begin = ts
                     last = ts
-                size = ts-begin
+                elapsed = ts-begin
+                
                 if tag == 'start':
                     if ts1 == 0: ts1=ts
-                    new_span(text, key, tid, ts=str(int(ts-ts1)), ctx=ctx, dev=dev)
-                elif tag == 'stop' and key in spans:
-                    end_span(key, duration)
-                    if text == 'grabbing transaction lock':
+                    sts = str(int(ts-ts1)) if not args.timestamp else l[1]
+                    new_span(msg, key, tid, ts=sts, ctx=ctx, dev=dev)
+                elif tag == 'stop':
+                    if key in open_spans:
+                        end_span(key, duration)
+                        if msg == 'waiting for transaction lock':
+                            ftext = 'holding transaction lock'
+                            fkey = tid+'-'+ftext
+                            sts = str(int(ts-ts1)) if not args.timestamp else l[1]
+                            new_span(ftext, fkey, tid, ts=sts, ctx=ctx, dev=dev)
+                            held_locks[tid] = ts
+                    elif msg == 'applying transaction' and ann == 'stopped':
                         ftext = 'holding transaction lock'
                         fkey = tid+'-'+ftext
-                        new_span(ftext, fkey, tid, ts=str(int(ts-ts1)), ctx=ctx, dev=dev)
-                        held_locks[tid] = ts
-                elif tag == 'info' and text == 'releasing transaction lock':
+                        if fkey in open_spans:
+                            sts = held_locks.pop(tid)
+                            fduration = ts-sts
+                            end_span(fkey, fduration)
+                elif tag == 'info' and msg == 'releasing transaction lock':
                     ftext = 'holding transaction lock'
                     fkey = tid+'-'+ftext
-                    if fkey in spans:
+                    if fkey in open_spans:
                         sts = held_locks.pop(tid)
                         fduration = ts-sts
                         end_span(fkey, fduration)
-                for s, d in spans.values():
-                    s.size = size
-                for s in spans_running.values():
-                    s.end = size
-                span_duration.plain = f'Span {size:0.3f} s'
+
+                # Update span sizes
+                for s in all_spans:
+                    s.size = elapsed
+                for s,_ in open_spans.values():
+                    s.end = elapsed
+
+                # Update span duration column
+                span_duration.plain = f'Span {elapsed:0.3f} s'
                 if (args.follow or last-ts>0.1) and args.realtime:
                     live.refresh()
+
+                # Sleep if not following and in realtime mode
                 if not args.follow and args.realtime and last:
                     delay = ts-last
                     if delay > 0:
@@ -262,6 +306,10 @@ def main(args):
     if args.file is None:
         print("You must specify a file to process.")
         sys.exit(1)
+    if args.begin is not None:
+        args.begin = datetime.fromisoformat(args.begin).timestamp()
+    if args.end is not None:
+        args.end = datetime.fromisoformat(args.end).timestamp()
     events = None
     if args.filter is not None:
         events = read_events(args.filter)
