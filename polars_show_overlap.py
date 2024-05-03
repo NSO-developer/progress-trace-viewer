@@ -15,6 +15,8 @@ def parseArgs(args):
             help='File to process.')
     parser.add_argument('--show-spans', action="store_true", default=False,
             help='Show spans when there is an overlap')
+    parser.add_argument('--show-tid', action="store_true", default=False,
+            help='Show spans when there is an overlap')
     parser.add_argument('--find-spans', action="store_true", default=False,
             help='Find overlapping spans')
     parser.add_argument('--hide-rows', action="store_true", default=False,
@@ -35,13 +37,13 @@ def process_overlap(args, progress_trace):
             #if tid not in spans: continue # ignore start events that are not in progress
             spans[tid] = 1
             if not args.hide_rows:
-                print(f"{ts}  {len(spans)} {m}")
+                print(f"{ts}  {len(spans)} {m}  {' '.join(map(str, spans.keys()))}")
             if args.show_spans and len(spans.keys())>1:
                 print(spans)
         elif et == 'stop':
             spans.pop(tid, None) # No exception if tid not found
             if not args.hide_rows:
-                print(f"{ts}  {len(spans)} {m}")
+                print(f"{ts}  {len(spans)} {m}  {' '.join(map(str, spans.keys()))}")
         p_ts = ts
         p_tid = tid
 
@@ -51,7 +53,7 @@ def main(args):
                             (pl.col('TIMESTAMP') != '') &
                             (pl.col('DATASTORE') == 'running') &
                             (pl.col('MESSAGE') == args.event)
-    )
+    ).sort('TIMESTAMP')
     if args.find_spans:
         args.hide_rows = True
         args.show_spans = True
