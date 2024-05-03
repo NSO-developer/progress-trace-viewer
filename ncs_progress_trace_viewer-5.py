@@ -153,7 +153,7 @@ def graph_progress_trace(args, f, events):
             if not args.ctid or tid in args.ctid:
                 color=get_color()
             else:
-                color=Color.from_ansi(1)
+                color=Color.from_ansi(237)
             tids_color[tid] = color
         else:
             color=tids_color[tid]
