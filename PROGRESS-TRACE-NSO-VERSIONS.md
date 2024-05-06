@@ -27,9 +27,9 @@ The goal is give better insight what NSO is doing and to be compatible with Open
 
 # Strategy
 ```
-Råa 5.7 loggar --> Preprocessa (Få till låsen mm.) ──────────────────────────> Processa/analysera osv.
-                                                    │                      │
-                                                    └──> Merge (CRS/RFS)───┘  
+Raw 5.7 los --> Pre-process (Fix locks etc.) ──────────────────────────> Process/analyza etc.
+                                              │                      │
+                                              └──> Merge (CRS/RFS)───┘  
 ```
 
 # CDB lock
