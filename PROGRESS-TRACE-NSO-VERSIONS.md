@@ -25,12 +25,20 @@ The goal is give better insight what NSO is doing and to be compatible with Open
 
 
 
-# Strategy
+# Preprocessing
 ```
-Raw 5.7 los --> Pre-process (Fix locks etc.) ──────────────────────────> Process/analyza etc.
+Raw 5.7 log --> Pre-process (Fix locks etc.) ──────────────────────────> Process/analyza etc.
                                               │                      │
                                               └──> Merge (CRS/RFS)───┘  
 ```
+
+5.x: Create syntetic spans for 'holding transaction lock' and 'holding device lock'.
+     There are no duration metrics for how long the CDB is locked.
+     
+6.x: Covert atribute names/values into separate columns (for easier filtering)
+     Additional attributes are written as new lines with the static column empty and only attribute_name and value filled in (to save space).
+
+
 
 # CDB lock
 
