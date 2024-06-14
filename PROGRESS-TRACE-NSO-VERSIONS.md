@@ -42,14 +42,16 @@ Raw 5.7 log --> Pre-process (Fix locks etc.) ───────────�
 
 # CDB lock
 
-## 5.7
+## 5.7, 5.8
 
 'stop' + 'grabbing transaction lock' -> 'info', 'releasing transaction lock' or 'stop', 'apply transaction', 'stopped'
 
 
 ## 6.x
 
-'start' + 'grabbing transaction lock' -> 'info', 'grabbing transaction lock'
+'start' + 'taking transaction lock' -> 'stop', 'taking transaction lock'
+'start' + 'holding transaction lock' -> 'stop', 'holding transaction lock'
+
 
 
 #Dry-run
