@@ -16,10 +16,13 @@ def parseArgs(args):
             help='Transaction id(s) to filter.')
     parser.add_argument('--trid', type=str,
             help='Trace id(s) to filter.')
-    parser.add_argument('cmd', choices=['holding', 'applying', 'push', 'rfs', 'traceid-map'],
+    parser.add_argument('cmd', choices=[
+        'holding', 'applying', 'push', 'rfs', 'traceid-map', 'devices', 'devices-count'],
             help='Command to execute.')
     parser.add_argument('-o', '--output', type=str,
             help='File to write traceid-map result to.')
+    parser.add_argument('--simple', action='store_true',
+                        help='Use simple output format.')
     return parser.parse_args(args)
 
 
@@ -119,23 +122,54 @@ def main(args):
         'START': 'START_RFS',
         'TIMESTAMP': 'TIMESTAMP_RFS',
         'DEVICE': 'DEVICE_RFS',    
+        'TRACE ID': 'CFS TRACE ID',
+        'TRACE ID_right': 'RFS TRACE ID',
+        'NODE_right': 'NODE_RFS',
     }).filter(
         ( pl.col('TIMESTAMP_RFS') <= pl.col('TIMESTAMP_PUSH') ) &
         ( pl.col('START_RFS') >= pl.col('START_PUSH') )
     )
     if args.cmd == 'rfs':
         print(cfs_rfs_events.collect())
-              
+
     if args.cmd == 'traceid-map':
-        traceid_map = cfs_rfs_events.select(['TRACE ID', 'TRACE ID_right']).rename({
-            'TRACE ID': 'CFS TRACE ID',
-            'TRACE ID_right': 'RFS TRACE ID'
-        }).group_by('CFS TRACE ID', 'RFS TRACE ID').len().collect()
+        traceid_map = (cfs_rfs_events
+            .select(['CFS TRACE ID', 'RFS TRACE ID'])
+            .group_by('CFS TRACE ID', 'RFS TRACE ID').len().collect()
+        )
         if args.output:
             traceid_map.write_csv(args.output, separator=',')
         else:
             print(traceid_map)
-    
+        return
+
+    rfs_push_events = d.filter(
+        (pl.col('MESSAGE') == 'push configuration') &
+        (pl.col('NODE') != 'CFS')
+    ).select(['TRACE ID', 'MESSAGE', 'NODE', 'DEVICE'])
+
+    rfs_devices = (cfs_rfs_events.
+        join(rfs_push_events, 
+             left_on=['RFS TRACE ID', 'DEVICE_PUSH'], right_on=['TRACE ID', 'NODE'])
+    )
+
+    if args.simple:
+        rfs_devices = rfs_devices.select([
+            'TRANSACTION ID',
+            'CFS TRACE ID',
+            'START_AT',
+            'TIMESTAMP_AT',
+            'DEVICE_PUSH',
+            'START_RFS',
+            'TIMESTAMP_RFS',
+            'RFS TRACE ID',
+            'DEVICE'
+        ])
+    if args.cmd == 'devices':
+        print(rfs_devices.collect())
+    if args.cmd == 'devices-count':
+        print(rfs_devices.group_by('TRANSACTION ID', 'CFS TRACE ID').len().collect())
+
     # ------------------------------------------------------------------------------------
     # Find duplicated RFS applying transaction events during a CFS push configuration
     # Most likely cause is that a dry-run was performed before the actual push
