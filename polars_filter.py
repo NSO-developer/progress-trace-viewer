@@ -3,6 +3,7 @@
 
 import argparse
 from datetime import datetime
+from functools import reduce
 import sys
 import time
 
@@ -28,6 +29,8 @@ def parseArgs(args):
             help='Device(s) to filter.')
     parser.add_argument('--node', type=str,
             help='Node(s) to filter.')
+    parser.add_argument('--service', type=str,
+            help='Service(s) to filter.')
     parser.add_argument('--ann', type=str,
             help='Annotation(s) to filter.')
     parser.add_argument('--begin', type=str,
@@ -42,61 +45,96 @@ def parseArgs(args):
             help='File to write result to.')
     parser.add_argument('-s', '--start', action='store_true',
             help='Calculate start timestamp from timestamp end duration.')
+    parser.add_argument('--rows', type=int, default=50,
+            help='Number of rows to display.')
+    parser.add_argument('-v', '--verbose', action='store_true',
+            help='Verbose output.')
+
     return parser.parse_args(args)
+
+
+def create_filter(name, arg, atype=str):
+        exprs = []
+        pos = []
+        neg = []
+        for s in arg.split(','):
+            if not s.startswith('^'):
+                pos.append(s)
+            else:
+                neg.append(s[1:])
+        if len(pos):
+            if pos[0] != '~':
+                exprs.append((pl.col(name).is_in(list(map(atype, pos)))))
+            else:
+                exprs.append((pl.col(name).is_null()))
+        if len(neg):
+            if neg[0] != '~':
+                exprs.append(~(pl.col(name).is_in(list(map(atype, neg)))))
+            else:
+                exprs.append(pl.col(name).is_not_null())
+        filter = reduce(lambda a,b: a&b, exprs)
+        return filter
 
 
 def main_polars(args):
     progress_trace = pl.scan_csv(args.file).\
         with_columns(pl.col('TIMESTAMP').str.to_datetime("%Y-%m-%dT%H:%M:%S%.f")).\
         sort('TIMESTAMP')
-    if args.tid:
+    if args.tid is not None:
         progress_trace = progress_trace.filter(
-            (pl.col('TRANSACTION ID').is_in(list(map(int, args.tid.split(',')))))
+            create_filter('TRANSACTION ID', args.tid, atype=int)
         )
-    if args.trid:
+    if args.trid is not None:
         progress_trace = progress_trace.filter(
-            (pl.col('TRACE ID').is_in(list(args.trid.split(','))))
+            create_filter('TRACE ID', args.trid)
         )
-    if args.et:
+    if args.et is not None:
         progress_trace = progress_trace.filter(
-            (pl.col('EVENT TYPE').is_in(list(args.et.split(','))))
+            create_filter('EVENT TYPE', args.et)
         )
-    if args.msg:    
+    if args.msg is not None:    
         progress_trace = progress_trace.filter(
-            (pl.col('MESSAGE').is_in(list(args.msg.split(','))))
+            create_filter('MESSAGE', args.msg)
         )
-    if args.ctx:
+    if args.ctx is not None:
         progress_trace = progress_trace.filter(
-            (pl.col('CONTEXT').is_in(list(args.ctx.split(','))))
+            create_filter('CONTEXT', args.ctx)
         )
-    if args.ds:
+    if args.ds is not None:
         progress_trace = progress_trace.filter(
-            (pl.col('DATASTORE') == args.ds)
+            create_filter('DATASTORE', args.ds)
         )
-    if args.device:    
+    if args.device is not None:    
         progress_trace = progress_trace.filter(
-            (pl.col('DEVICE').is_in(list(args.device.split(','))))
+            create_filter('DEVICE', args.device)
         )
-    if args.node:    
+    if args.node is not None:    
         progress_trace = progress_trace.filter(
-            (pl.col('NODE').is_in(list(args.node.split(','))))
+            create_filter('NODE', args.node)
         )
-    if args.ann:
+    if args.service is not None:
         progress_trace = progress_trace.filter(
-            (pl.col('ANNOTATION').is_in(list(args.ann.split(','))))
+            create_filter('SERVICE', args.service)
         )
-    if args.begin:
+    if args.ann is not None:
+        progress_trace = progress_trace.filter(
+            create_filter('ANNOTATION', args.ann)
+        )
+    if args.begin is not None:
         progress_trace = progress_trace.filter(
             (pl.col('TIMESTAMP') >= datetime.fromisoformat(args.begin))
          )
-    if args.end:
+    if args.end is not None:
         progress_trace = progress_trace.filter(
             (pl.col('TIMESTAMP') <= datetime.fromisoformat(args.end))
          )
-    if args.start:
+    if args.start is not None:
         progress_trace = progress_trace.with_columns(
             (pl.col('TIMESTAMP')-(pl.col('DURATION')*1000000).cast(pl.Duration('us'))).alias('START')
         )
+    if args.verbose:
+        print(progress_trace)
+
     result = progress_trace.collect()
     columns = progress_trace.columns
 
@@ -127,7 +165,7 @@ def main_polars(args):
         ]
 
     result = result.select(columns)
-    pl.Config().set_tbl_rows(1000)
+    pl.Config().set_tbl_rows(args.rows)
 
     if args.output:
         result.write_csv(args.output, separator=',')
