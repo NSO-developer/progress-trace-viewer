@@ -54,20 +54,23 @@ Raw 5.7 log --> Pre-process (Fix locks etc.) ───────────�
 
 
 
-#Dry-run
+# Dry-run
 
 ## 5.7
 
 CFS:
-start,2024-05-03T13:05:37.734037,,84,1126,running,cli,f57a7f46-c451-4a94-9cc7-b924e3660487,,abort,,,,,,,,"abort",
-info,2024-05-03T13:05:37.734079,,84,1126,running,cli,f57a7f46-c451-4a94-9cc7-b924e3660487,cdb,abort,,,,,,,,"abort",
-info,2024-05-03T13:05:37.735934,,84,1126,running,cli,f57a7f46-c451-4a94-9cc7-b924e3660487,,,,,,,,,,"releasing transaction lock",
-stop,2024-05-03T13:05:37.736096,0.002059,84,1126,running,cli,f57a7f46-c451-4a94-9cc7-b924e3660487,,abort,,,,,,,,"abort",
-stop,2024-05-03T13:05:37.736130,0.128458,84,1126,running,cli,f57a7f46-c451-4a94-9cc7-b924e3660487,,,,,,,,,,"applying transaction","error"
+- start,2024-05-03T13:05:37.734037,,84,1126,running,cli,f57a7f46-c451-4a94-9cc7-b924e3660487,,abort,,,,,,,,"abort",
+- info,2024-05-03T13:05:37.734079,,84,1126,running,cli,f57a7f46-c451-4a94-9cc7-b924e3660487,cdb,abort,,,,,,,,"abort",
+- info,2024-05-03T13:05:37.735934,,84,1126,running,cli,f57a7f46-c451-4a94-9cc7-b924e3660487,,,,,,,,,,"releasing transaction lock",
+- stop,2024-05-03T13:05:37.736096,0.002059,84,1126,running,cli,f57a7f46-c451-4a94-9cc7-b924e3660487,,abort,,,,,,,,"abort",
+- stop,2024-05-03T13:05:37.736130,0.128458,84,1126,running,cli,f57a7f46-c451-4a94-9cc7-b924e3660487,,,,,,,,,,"applying transaction","error"
 
 RFS:
-start,2024-05-03T13:05:37.727707,,148,512,running,netconf,f57a7f46-c451-4a94-9cc7-b924e3660487,,abort,,,,,,,,"abort",
-info,2024-05-03T13:05:37.727736,,148,512,running,netconf,f57a7f46-c451-4a94-9cc7-b924e3660487,cdb,abort,,,,,,,,"abort",
-info,2024-05-03T13:05:37.728753,,148,512,running,netconf,f57a7f46-c451-4a94-9cc7-b924e3660487,,,,,,,,,,"releasing transaction lock",
-stop,2024-05-03T13:05:37.728974,0.001267,148,512,running,netconf,f57a7f46-c451-4a94-9cc7-b924e3660487,,abort,,,,,,,,"abort",
-stop,2024-05-03T13:05:37.729009,0.027270,148,512,running,netconf,f57a7f46-c451-4a94-9cc7-b924e3660487,,,,,,,,,,"applying transaction","error"
+- start,2024-05-03T13:05:37.727707,,148,512,running,netconf,f57a7f46-c451-4a94-9cc7-b924e3660487,,abort,,,,,,,,"abort",
+- info,2024-05-03T13:05:37.727736,,148,512,running,netconf,f57a7f46-c451-4a94-9cc7-b924e3660487,cdb,abort,,,,,,,,"abort",
+- info,2024-05-03T13:05:37.728753,,148,512,running,netconf,f57a7f46-c451-4a94-9cc7-b924e3660487,,,,,,,,,,"releasing transaction lock",
+- stop,2024-05-03T13:05:37.728974,0.001267,148,512,running,netconf,f57a7f46-c451-4a94-9cc7-b924e3660487,,abort,,,,,,,,"abort",
+- stop,2024-05-03T13:05:37.729009,0.027270,148,512,running,netconf,f57a7f46-c451-4a94-9cc7-b924e3660487,,,,,,,,,,"applying transaction","error"
+
+* push configuration is written just as a stop event with annotation error.
+* apply transaction stop comes with annotation error.
