@@ -6,6 +6,7 @@ from datetime import datetime
 import os
 import sys
 import time
+import traceback
 
 import polars as pl
 from rich.live import Live
@@ -121,6 +122,7 @@ def get_table(span_header="Span", rel_time = True):
         table.add_column("Timestamp", max_width=28, justify="right", no_wrap=True)
     table.add_column("Event", min_width=20, no_wrap=True)
     table.add_column("Context", max_width=20, no_wrap=True)
+    table.add_column("Node", max_width=20, no_wrap=True)
     table.add_column("Device", max_width=20, no_wrap=True)
     table.add_column("TId", min_width=3, no_wrap=True)
     table.add_column("Duration", min_width=10, justify="right", no_wrap=True)
@@ -148,7 +150,7 @@ def graph_progress_trace(args, f, events):
     if args.tid:
         args.tid = args.tid.split(',')
 
-    def new_span(text, key, tid, ts='', ctx='', dev=''):
+    def new_span(text, key, tid, ts='', ctx='', node='', dev=''):
         if tid not in tids_color:
             if not args.ctid or tid in args.ctid:
                 color=get_color()
@@ -165,7 +167,7 @@ def graph_progress_trace(args, f, events):
             tids[tid] = [(text, d, span)]
         else:
             tids[tid].append((text, d, span))
-        table.add_row(ts, text, ctx, dev, tid, d, span)
+        table.add_row(ts, text, ctx, node, dev, tid, d, span)
 
     def end_span(key, duration):
         s, d = open_spans[key]
@@ -174,7 +176,6 @@ def graph_progress_trace(args, f, events):
         if key in open_spans:
             del open_spans[key]
 
-    
 
     with Live(table) as live:
         header = None
@@ -220,10 +221,11 @@ def graph_progress_trace(args, f, events):
                 sid = l[3+have_span_id]
                 tid = l[4+have_span_id]
                 ctx = l[6]
+                node = l[13+have_trace_id] # Must find a better algo to detect available fields
                 dev = l[14+have_trace_id]
                 msg = l[17+have_trace_id]
                 ann = l[18+have_trace_id]
-                
+
                 key = '-'.join([sid, tid]+l[11+have_trace_id:18+have_trace_id])
 
                 # Filter on transaction id if provided
@@ -238,42 +240,19 @@ def graph_progress_trace(args, f, events):
                 if args.end and ts > args.end:
                     continue
 
-                if msg == 'grabbing transaction lock':
-                    msg = 'waiting for transaction lock'
-
                 # Calculate elapsed time
                 if begin == 0.0:
                     begin = ts
                     last = ts
                 elapsed = ts-begin
-                
+
                 if tag == 'start':
                     if ts1 == 0: ts1=ts
                     sts = str(int(ts-ts1)) if not args.timestamp else l[1]
-                    new_span(msg, key, tid, ts=sts, ctx=ctx, dev=dev)
+                    new_span(msg, key, tid, ts=sts, ctx=ctx, node=node, dev=dev)
                 elif tag == 'stop':
                     if key in open_spans:
                         end_span(key, duration)
-                        if msg == 'waiting for transaction lock':
-                            ftext = 'holding transaction lock'
-                            fkey = tid+'-'+ftext
-                            sts = str(int(ts-ts1)) if not args.timestamp else l[1]
-                            new_span(ftext, fkey, tid, ts=sts, ctx=ctx, dev=dev)
-                            held_locks[tid] = ts
-                    elif msg == 'applying transaction' and ann == 'stopped':
-                        ftext = 'holding transaction lock'
-                        fkey = tid+'-'+ftext
-                        if fkey in open_spans:
-                            sts = held_locks.pop(tid)
-                            fduration = ts-sts
-                            end_span(fkey, fduration)
-                elif tag == 'info' and msg == 'releasing transaction lock':
-                    ftext = 'holding transaction lock'
-                    fkey = tid+'-'+ftext
-                    if fkey in open_spans:
-                        sts = held_locks.pop(tid)
-                        fduration = ts-sts
-                        end_span(fkey, fduration)
 
                 # Update span sizes
                 for s in all_spans:
@@ -296,6 +275,7 @@ def graph_progress_trace(args, f, events):
         except Exception as e:
             print(f"ERROR: At line {n}")
             print(e)
+            print(traceback.format_exc())
 
 
 
