@@ -33,13 +33,13 @@ def process_overlap(args, progress_trace):
             assert(tid not in spans)
             spans[tid] = 1
             if not args.hide_rows:
-                print(f"{ts}  {len(spans)}")
+                print(f"{ts}  {len(spans)} {spans}")
             if args.show_spans and len(spans.keys())>1:
                 print(spans)
         elif et == 'stop':
             del spans[tid]
             if not args.hide_rows:
-                print(f"{ts}  {len(spans)}")
+                print(f"{ts}  {len(spans)} {spans}")
         p_ts = ts
         p_tid = tid
 
