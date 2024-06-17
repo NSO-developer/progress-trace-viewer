@@ -49,6 +49,8 @@ def parseArgs(args):
             help='Number of rows to display.')
     parser.add_argument('-v', '--verbose', action='store_true',
             help='Verbose output.')
+    parser.add_argument('--group', type=str,
+            help='Column(s) to group on.')
 
     return parser.parse_args(args)
 
@@ -132,6 +134,8 @@ def main_polars(args):
         progress_trace = progress_trace.with_columns(
             (pl.col('TIMESTAMP')-(pl.col('DURATION')*1000000).cast(pl.Duration('us'))).alias('START')
         )
+    if args.group is not None:
+        progress_trace = progress_trace.group_by(args.group).len()
     if args.verbose:
         print(progress_trace)
 
