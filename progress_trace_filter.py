@@ -2,6 +2,7 @@
 #-*- coding: utf-8; mode: python; py-indent-offset: 4; tab-width: 4 -*-
 
 import argparse
+import ast
 from datetime import datetime
 from functools import reduce
 import re
@@ -67,6 +68,11 @@ COLS_DTYPES = {
     'DURATION': float,
     'START': datetime.fromisoformat,
     'len': int,
+    'MIN:': float,
+    'MAX:': float,
+    'MEAN:': float,
+    'STD:': float,
+    'COUNT:': int,
 }
 
 
@@ -94,33 +100,36 @@ def create_filter(name, arg):
         return filter
 
 
+# Use the ast module to parse the filter expression
+
 def parse_filter(filter_str):
-    for f in filter_str.split(','):
-        exprs = []
-        try:
-            left, cmp, right = re.split('(==|>=|<=|>|<)', f)
-            if not left.isidentifier():
-                print(f"Invalid filter expression. Left part is not an identifier: {left}")
-                sys.exit(1)
-            if not right.isnumeric():
-                print(f"Invalid filter expression. Right part is not numeric: {right}")
-                sys.exit(1)
-            dtype = COLS_DTYPES.get(left, str)
-            right = dtype(right)
-            if cmp == '==':
-                exprs.append(pl.col(left) == right)
-            elif cmp == '>=':
-                exprs.append(pl.col(left) >= right)
-            elif cmp == '<=':
-                exprs.append(pl.col(left) <= right)
-            elif cmp == '>':
-                exprs.append(pl.col(left) > right)
-            elif cmp == '<':
-                exprs.append(pl.col(left) < right)
-        except ValueError:
-            print(f"Invalid filter expression: {f}")
-            sys.exit(1)
-    return reduce(lambda a,b: a&b, exprs)
+    operators = {ast.Eq: pl.Expr.eq, ast.NotEq: pl.Expr.ne, ast.Lt: pl.Expr.lt, ast.Gt: pl.Expr.gt,
+                 ast.LtE: pl.Expr.le, ast.GtE: pl.Expr.ge, ast.BitAnd: pl.Expr.and_, ast.BitOr: pl.Expr.or_, 
+                 ast.Or: pl.Expr.or_, ast.And: pl.Expr.and_}
+
+    def eval_expr(expr):
+        return eval_(ast.parse(expr, mode='eval').body)
+
+    def eval_(node):
+        match node:
+            case ast.Name(name):
+                return pl.col(name)
+            case ast.Constant(value):
+                return value
+            case ast.BinOp(left, op, right):
+                return operators[type(op)](eval_(left), eval_(right))
+            case ast.BoolOp(op, comparators):
+                return reduce(lambda a,b: operators[type(op)](a,b), map(eval_, comparators))
+            case ast.Compare(left, [op, *r], [right, *_]):
+                if len(r) > 0:
+                    raise TypeError(node)
+                return operators[type(op)](eval_(left), eval_(right))
+            case r:
+                print("Unsupported:", r)
+                raise TypeError(node)
+            
+    return eval_expr(filter_str)
+
 
 def main_polars(args):
     progress_trace = pl.scan_csv(args.file).\
