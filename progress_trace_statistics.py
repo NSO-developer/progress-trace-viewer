@@ -2,6 +2,7 @@
 
 import argparse
 from datetime import datetime
+from functools import reduce
 import re
 import sys
 
@@ -11,8 +12,57 @@ import polars as pl
 def parseArgs(args):
     parser = argparse.ArgumentParser()
     parser.add_argument('file', type=str,
-            help='File to process.')
+        help='File to process.')
+    parser.add_argument('-f', '--filter', type=str,
+        help='Filter expression.')
+    parser.add_argument('-s', '--sort', type=str,
+        help='Sort column(s).')
     return parser.parse_args(args)
+
+
+COLS_DTYPES = {
+    'TRANSACTION ID': int,
+    'SESSION ID': int,
+    'TIMESTAMP': datetime.fromisoformat,
+    'DURATION': float,
+    'START': datetime.fromisoformat,
+    'MIN': float,
+    'MAX': float,
+    'MEAN': float,
+    'STD': float,
+    'COUNT': int,
+    'SUM': float,
+    'len': int,
+}
+
+
+def parse_filter(filter_str):
+    for f in filter_str.split(','):
+        exprs = []
+        try:
+            left, cmp, right = re.split('(==|>=|<=|>|<)', f)
+            if not left.isidentifier():
+                print(f"Invalid filter expression. Left part is not an identifier: {left}")
+                sys.exit(1)
+            if not right.isnumeric():
+                print(f"Invalid filter expression. Right part is not numeric: {right}")
+                sys.exit(1)
+            dtype = COLS_DTYPES.get(left, str)
+            right = dtype(right)
+            if cmp == '==':
+                exprs.append(pl.col(left) == right)
+            elif cmp == '>=':
+                exprs.append(pl.col(left) >= right)
+            elif cmp == '<=':
+                exprs.append(pl.col(left) <= right)
+            elif cmp == '>':
+                exprs.append(pl.col(left) > right)
+            elif cmp == '<':
+                exprs.append(pl.col(left) < right)
+        except ValueError:
+            print(f"Invalid filter expression: {f}")
+            sys.exit(1)
+    return reduce(lambda a,b: a&b, exprs)
 
 
 def sprintf(s, fmt):
@@ -104,20 +154,28 @@ def get_statistics(progress_trace, datastore='running'):
         ])
     )
 
-    return duration_grouped_by_message.collect().sort('MESSAGE')
+    return duration_grouped_by_message.sort('MESSAGE')
 
 
 def main(args):
     progress_trace = (pl.scan_csv(args.file)
         .filter(
-            (pl.col('TIMESTAMP') != '') # filter out empty rows in case the CSV is not preprocessed
+             # filter out empty rows in case the CSV is not preprocessed
+            (pl.col('TIMESTAMP') != '')
         )
     )
 
     pl.Config().set_tbl_rows(1000)
     pl.Config().set_fmt_str_lengths(100)
 
-    print(get_statistics(progress_trace).with_columns([
+    statistics = get_statistics(progress_trace)
+
+    if args.filter is not None:
+        statistics = statistics.filter(parse_filter(args.filter))
+    if args.sort is not None:
+        statistics = statistics.sort(args.sort)
+
+    print(statistics.collect().with_columns([
             sprintf(pl.col('COUNT'), "%6d", ),
             sprintf(pl.col('SUM'), "%12.6f"),
             sprintf(pl.col('STD'), "%12.6f"),
@@ -125,6 +183,8 @@ def main(args):
             sprintf(pl.col('MIN'), "%12.6f"),
             sprintf(pl.col('MAX'), "%12.6f")        
     ]))
+
+
 
 
 if __name__ == '__main__':
