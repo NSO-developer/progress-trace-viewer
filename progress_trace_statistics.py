@@ -45,7 +45,7 @@ def sprintf(s, fmt):
     # determine # of decimals
     if result.group("char") == 's':
         # string requested: return immediately
-        expr = s.str.ljust(total_width) if result.group("align") == '<' else s.str.rjust(total_width)
+        expr = s.str.ljust(total_width) if result.group("align") == '<' else s.str.pad_start(total_width)
         return pl.select(expr).to_series() if isinstance(s, pl.Series) else expr
 
     elif result.group("char") == 'd' or result.group("dot") != '.':
@@ -77,39 +77,46 @@ def sprintf(s, fmt):
         head = s.cast(pl.Int32).cast(pl.Utf8)
         tail = []
 
-    head = head.str.zfill(head_width) if lead_zeros else head.str.rjust(head_width)
+    head = head.str.zfill(head_width) if lead_zeros else head.str.pad_start(head_width)
     expr = pl.concat_str([head, *tail, *pct])
 
     return pl.select(expr).to_series() if isinstance(s, pl.Series) else expr
 
 
 def get_statistics(progress_trace, datastore='running'):
-    d = progress_trace.filter((pl.col('DATASTORE') == datastore) &
+    progress_trace = progress_trace.filter(
+            (pl.col('DATASTORE') == datastore) &
             (pl.col('EVENT TYPE') == 'stop') &
-            ~(pl.col('MESSAGE').str.starts_with('check conflict'))
+           ~(pl.col('MESSAGE').str.starts_with('check conflict') # filter out check conflict messages
+                                                                 # as they contains dependant information
+        )
     )
 
-
-    duration_grouped_by_message = d.group_by('MESSAGE').agg([
+    duration_grouped_by_message = (progress_trace
+        .group_by('MESSAGE')
+        .agg([
             pl.col('MESSAGE').len().alias('COUNT'),
             pl.col('DURATION').sum().alias('SUM'),
             pl.col('DURATION').std().alias('STD'),
             pl.col('DURATION').mean().alias('MEAN'),
             pl.col('DURATION').min().alias('MIN'),
-            pl.col('DURATION').max().alias('MAX')
-            ])
+            pl.col('DURATION').max().alias('MAX')    
+        ])
+    )
 
     return duration_grouped_by_message.collect().sort('MESSAGE')
 
 
 def main(args):
-    progress_trace = pl.scan_csv(args.file).filter(
-                            (pl.col('TIMESTAMP') != '')
+    progress_trace = (pl.scan_csv(args.file)
+        .filter(
+            (pl.col('TIMESTAMP') != '') # filter out empty rows in case the CSV is not preprocessed
+        )
     )
 
     pl.Config().set_tbl_rows(1000)
+    pl.Config().set_fmt_str_lengths(100)
 
-    print("=== RUNNING ===")
     print(get_statistics(progress_trace).with_columns([
             sprintf(pl.col('COUNT'), "%6d", ),
             sprintf(pl.col('SUM'), "%12.6f"),
@@ -118,10 +125,7 @@ def main(args):
             sprintf(pl.col('MIN'), "%12.6f"),
             sprintf(pl.col('MAX'), "%12.6f")        
     ]))
-#    print("\n=== NO DATASTORE ===")
-#    print(get_statistics(progress_trace, ''))
-#    print("\n=== OPERATIONAL ===")
-#    print(get_statistics(progress_trace, 'operational'))
+
 
 if __name__ == '__main__':
     main(parseArgs(sys.argv[1:]))
