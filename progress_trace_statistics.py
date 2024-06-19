@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import ast
 from datetime import datetime
 from functools import reduce
 import re
@@ -37,32 +38,36 @@ COLS_DTYPES = {
 
 
 def parse_filter(filter_str):
-    for f in filter_str.split(','):
-        exprs = []
-        try:
-            left, cmp, right = re.split('(==|>=|<=|>|<)', f)
-            if not left.isidentifier():
-                print(f"Invalid filter expression. Left part is not an identifier: {left}")
-                sys.exit(1)
-            if not right.isnumeric():
-                print(f"Invalid filter expression. Right part is not numeric: {right}")
-                sys.exit(1)
-            dtype = COLS_DTYPES.get(left, str)
-            right = dtype(right)
-            if cmp == '==':
-                exprs.append(pl.col(left) == right)
-            elif cmp == '>=':
-                exprs.append(pl.col(left) >= right)
-            elif cmp == '<=':
-                exprs.append(pl.col(left) <= right)
-            elif cmp == '>':
-                exprs.append(pl.col(left) > right)
-            elif cmp == '<':
-                exprs.append(pl.col(left) < right)
-        except ValueError:
-            print(f"Invalid filter expression: {f}")
-            sys.exit(1)
-    return reduce(lambda a,b: a&b, exprs)
+    operators = {ast.Eq: pl.Expr.eq, ast.NotEq: pl.Expr.ne, ast.Lt: pl.Expr.lt, ast.Gt: pl.Expr.gt,
+                 ast.LtE: pl.Expr.le, ast.GtE: pl.Expr.ge, ast.BitAnd: pl.Expr.and_, ast.BitOr: pl.Expr.or_, 
+                 ast.Or: pl.Expr.or_, ast.And: pl.Expr.and_}
+
+    def eval_expr(expr):
+        return eval_(ast.parse(expr, mode='eval').body)
+
+    def eval_(node):
+        match node:
+            case ast.Name(name):
+                return pl.col(name.replace('_',' '))
+            case ast.Constant(value):
+                return value
+            case ast.BinOp(left, op, right):
+                return operators[type(op)](eval_(left), eval_(right))
+            case ast.BoolOp(op, comparators):
+                return reduce(lambda a,b: operators[type(op)](a,b), map(eval_, comparators))
+            case ast.Compare(left, [op, *r], [right, *_]):
+                if len(r) > 0:
+                    raise TypeError(node)
+                if type(op) == ast.Eq and right.value is None:
+                    return eval_(left).is_null()
+                elif type(op) == ast.NotEq and right.value is None:
+                    return eval_(left).is_not_null()
+                return operators[type(op)](eval_(left), eval_(right))
+            case r:
+                print("Unsupported:", r)
+                raise TypeError(node)
+            
+    return eval_expr(filter_str)
 
 
 def sprintf(s, fmt):
@@ -173,7 +178,7 @@ def main(args):
     if args.filter is not None:
         statistics = statistics.filter(parse_filter(args.filter))
     if args.sort is not None:
-        statistics = statistics.sort(args.sort)
+        statistics = statistics.sort(args.sort.split(','))
 
     print(statistics.collect().with_columns([
             sprintf(pl.col('COUNT'), "%6d", ),
