@@ -25,6 +25,8 @@ def parseArgs(args):
         help='Filter expression.')
     parser.add_argument('-c', '--count', action='store_true',
         help='Count rows.')
+    parser.add_argument('-a', '--agg', action='store_true',
+        help='Aggregate rows.')
     parser.add_argument('--show-ts', action='store_true',
         help='Show timestamps.')
     parser.add_argument('cmd', choices=
@@ -43,6 +45,8 @@ def parseArgs(args):
         help='File to write traceid-map result to.')
     parser.add_argument('--rows', type=int, default=10,
         help='Number of rows to display.')
+    parser.add_argument('-w', '--width', type=int, default=64,
+        help='Column width.')
     parser.add_argument('--simple', action='store_true',
         help='Use simple output format.')
     parser.add_argument('--duplicates', action='store_true',
@@ -67,8 +71,10 @@ def print_query(query, args, group_col='TRACE ID AT'):
     if not args.show_ts:
         query = query.select(list(filter(lambda x: not x.startswith('TIMESTAMP'), query.columns)))
     query = query.rename(fix_column_name)
-    print(query.collect())
-
+    if not args.output:
+        print(query.collect())
+    else:
+        query.write_csv(args.output, separator=',')
 
 def parse_filter(filter_str):
     operators = {ast.Eq: pl.Expr.eq, ast.NotEq: pl.Expr.ne, ast.Lt: pl.Expr.lt, ast.Gt: pl.Expr.gt,
@@ -106,7 +112,7 @@ def parse_filter(filter_str):
 def main(args):
     pl.Config().set_tbl_rows(args.rows)
     pl.Config().set_tbl_cols(-1)
-    pl.Config().set_fmt_str_lengths(64)
+    pl.Config().set_fmt_str_lengths(args.width)
 
     if args.filter is not None:
         args.filter_expr = parse_filter(args.filter)
@@ -219,10 +225,17 @@ def main(args):
         )
     )
 
+    if args.agg:
+        # Aggregate run service events, store in trans_events for further processing
+        trans_events = (rs_in_trans_events
+            .group_by('TRACE ID AT')
+            .agg('SERVICE RS', pl.count('SERVICE RS').alias('RS CNT'))
+        )
+
     # COMMAND: run-service
 
     if args.cmd == 'run-service':
-        print_query(rs_in_trans_events, args)
+        print_query(trans_events, args)
         return
 
 
@@ -245,8 +258,8 @@ def main(args):
 
     push_in_trans_events = (trans_events
         .join(push_events, how='left',
-            left_on=['TRANSACTION ID AT', 'TRACE ID AT'],
-            right_on=['TRANSACTION ID PC', 'TRACE ID PC']
+            left_on=['TRACE ID AT'],
+            right_on=['TRACE ID PC']
         )
     )
 
@@ -298,12 +311,12 @@ def main(args):
     if args.cmd == 'rfs-traceid-map':
         traceid_map = (cfs_rfs_events
             .select(['TRACE ID AT', 'TRACE ID RAT'])
-            .group_by('TRACE ID AT', 'TRACE ID RAT').len().collect()
+            .group_by('TRACE ID AT', 'TRACE ID RAT').len()
         )
         if args.output:
             traceid_map.write_csv(args.output, separator=',')
         else:
-            print(traceid_map)
+            print_query(traceid_map, args)
         return
 
     # ------------------------------------------------------------------------------------
@@ -318,22 +331,29 @@ def main(args):
             (pl.col('MESSAGE RRS') == 'run service') &
             (pl.col('NODE RRS') != 'CFS')
         )
-        .select(['TRANSACTION ID RRS', 'TRACE ID RRS', 'SERVICE RRS', 'START RRS', 'TIMESTAMP RRS'])
+        .select(['NODE RRS', 'TRANSACTION ID RRS', 'TRACE ID RRS', 'START RRS', 'TIMESTAMP RRS', 'SERVICE RRS'])
     )
 
    # Correlate push configuration events with applying transaction events
 
     rrs_in_trans_events = (cfs_rfs_events
         .join(rrs_events, how='left',
-            left_on=['TRANSACTION ID RAT', 'TRACE ID RAT'],
-            right_on=['TRANSACTION ID RRS', 'TRACE ID RRS']
+            left_on=['TRACE ID RAT', 'DEVICE PC'],
+            right_on=['TRACE ID RRS', 'NODE RRS']
         )
     )
+
+    if args.agg:
+        # Aggregate run service events, store in trans_events for further processing
+        cfs_rfs_events = (rrs_in_trans_events
+            .group_by('TRACE ID AT', 'SERVICE RS', 'RS CNT', 'DEVICE PC', 'TRACE ID RAT')
+            .agg('SERVICE RRS', pl.count('SERVICE RRS').alias('RRS CNT'))
+        )
 
     # COMMAND: rfs-run-service
 
     if args.cmd == 'rfs-run-service':
-        print_query(rrs_in_trans_events, args)
+        print_query(cfs_rfs_events, args)
         return
     
 
@@ -370,6 +390,13 @@ def main(args):
             'TIMESTAMP RPC',
             'DEVICE RPC'
         ])
+
+    if args.agg:
+        # Aggregate rfs push events, store in rfs_device_events (for further processing)
+        rfs_device_events = (rfs_device_events
+            .group_by('TRACE ID AT', 'SERVICE RS', 'RS CNT', 'DEVICE PC', 'TRACE ID RAT', 'SERVICE RRS', 'RRS CNT')
+            .agg('DEVICE RPC', pl.count('DEVICE RPC').alias('RPC CNT'))
+        )
 
     # COMMAND: rfs-push
 
