@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import ast
 from datetime import datetime
 from functools import reduce
 import re
@@ -24,27 +25,33 @@ def parseArgs(args):
         help='Filter expression.')
     parser.add_argument('-c', '--count', action='store_true',
         help='Count rows.')
+    parser.add_argument('--show-ts', action='store_true',
+        help='Show timestamps.')
     parser.add_argument('cmd', choices=
         [
             'holding',
             'applying',
             'push',
             'run-service',
-            'rfs',
-            'traceid-map',
+            'rfs-applying',
+            'rfs-traceid-map',
             'rfs-run-service',
-            'rfs-device', 
+            'rfs-push', 
         ],
         help='Command to execute.')
     parser.add_argument('-o', '--output', type=str,
         help='File to write traceid-map result to.')
-    parser.add_argument('--rows', type=int, default=50,
+    parser.add_argument('--rows', type=int, default=10,
         help='Number of rows to display.')
     parser.add_argument('--simple', action='store_true',
         help='Use simple output format.')
     parser.add_argument('--duplicates', action='store_true',
         help='Show duplicated events.')
     return parser.parse_args(args)
+
+
+def fix_column_name(name):
+    return name.replace('ANNOTATION' ,'ANN').replace('TRANSACTION ID', 'TID').replace('DURATION', 'DUR')
 
 
 def print_query(query, args, group_col='TRACE ID AT'):
@@ -56,35 +63,44 @@ def print_query(query, args, group_col='TRACE ID AT'):
             )
     if args.filter is not None:
         query = query.filter(args.filter_expr)
+        print(args.filter_expr)
+    if not args.show_ts:
+        query = query.select(list(filter(lambda x: not x.startswith('TIMESTAMP'), query.columns)))
+    query = query.rename(fix_column_name)
     print(query.collect())
 
 
 def parse_filter(filter_str):
-    for f in filter_str.split(','):
-        exprs = []
-        try:
-            left, cmp, right = re.split('(==|>=|<=|>|<)', f)
-            if not left.isidentifier():
-                print(f"Invalid filter expression. Left part is not an identifier: {left}")
-                sys.exit(1)
-            if not right.isnumeric():
-                print(f"Invalid filter expression. Right part is not numeric: {right}")
-                sys.exit(1)
-            right = int(right)
-            if cmp == '==':
-                exprs.append(pl.col(left) == right)
-            elif cmp == '>=':
-                exprs.append(pl.col(left) >= right)
-            elif cmp == '<=':
-                exprs.append(pl.col(left) <= right)
-            elif cmp == '>':
-                exprs.append(pl.col(left) > right)
-            elif cmp == '<':
-                exprs.append(pl.col(left) < right)
-        except ValueError:
-            print(f"Invalid filter expression: {f}")
-            sys.exit(1)
-    return reduce(lambda a,b: a&b, exprs)
+    operators = {ast.Eq: pl.Expr.eq, ast.NotEq: pl.Expr.ne, ast.Lt: pl.Expr.lt, ast.Gt: pl.Expr.gt,
+                 ast.LtE: pl.Expr.le, ast.GtE: pl.Expr.ge, ast.BitAnd: pl.Expr.and_, ast.BitOr: pl.Expr.or_, 
+                 ast.Or: pl.Expr.or_, ast.And: pl.Expr.and_}
+
+    def eval_expr(expr):
+        return eval_(ast.parse(expr, mode='eval').body)
+
+    def eval_(node):
+        match node:
+            case ast.Name(name):
+                return pl.col(name.replace('_',' '))
+            case ast.Constant(value):
+                return value
+            case ast.BinOp(left, op, right):
+                return operators[type(op)](eval_(left), eval_(right))
+            case ast.BoolOp(op, comparators):
+                return reduce(lambda a,b: operators[type(op)](a,b), map(eval_, comparators))
+            case ast.Compare(left, [op, *r], [right, *_]):
+                if len(r) > 0:
+                    raise TypeError(node)
+                if type(op) == ast.Eq and right.value is None:
+                    return eval_(left).is_null()
+                elif type(op) == ast.NotEq and right.value is None:
+                    return eval_(left).is_not_null()
+                return operators[type(op)](eval_(left), eval_(right))
+            case r:
+                print("Unsupported:", r)
+                raise TypeError(node)
+            
+    return eval_expr(filter_str)
 
 
 def main(args):
@@ -123,7 +139,6 @@ def main(args):
         .with_columns(
             (pl.col('TIMESTAMP')-(pl.col('DURATION')*1000000).cast(pl.Duration('us'))).alias('START')
         )
-        .sort('TIMESTAMP')
     )
 
 
@@ -135,8 +150,8 @@ def main(args):
     hold_events = (progress_trace.filter(
         (pl.col('MESSAGE') == 'holding transaction lock') &
         (pl.col('NODE') == 'CFS')
-    ).select(['TRANSACTION ID', 'TRACE ID', 'START', 'TIMESTAMP'])
-     .rename(lambda column_name: column_name+' HTL')
+    ).select(['TRANSACTION ID', 'TRACE ID', 'START', 'TIMESTAMP', 'DURATION'])
+     .rename(lambda column_name: column_name + ' HTL')
     )
 
     if args.tid:
@@ -152,7 +167,7 @@ def main(args):
     # COMMAND: holding
 
     if args.cmd == 'holding':
-        print(hold_events.collect())
+        print_query(hold_events, args, 'TRACE ID HTL')
         return
 
 
@@ -162,20 +177,21 @@ def main(args):
 
     # Find surrounding applying transaction events query
 
-    trans_events = (progress_trace.rename(lambda column_name: column_name+' AT')
+    trans_events = (progress_trace
+        .rename(lambda column_name: column_name+' AT')
         .join(hold_events,
             left_on=['TRANSACTION ID AT', 'TRACE ID AT'], 
             right_on=['TRANSACTION ID HTL', 'TRACE ID HTL']
         )
         .group_by('TRANSACTION ID AT')
         .last()
-        .select(['TRANSACTION ID AT', 'TRACE ID AT', 'START AT', 'TIMESTAMP AT', 'ANNOTATION AT'])
+        .select(['TRANSACTION ID AT', 'TRACE ID AT', 'START AT', 'TIMESTAMP AT', 'DURATION AT', 'ANNOTATION AT'])
     )
     
     # COMMAND: applying
 
     if args.cmd == 'applying':
-        print(trans_events.collect())
+        print_query(trans_events, args)
         return
 
 
@@ -185,12 +201,13 @@ def main(args):
 
     # Find contained run service events query
 
-    rs_events = (progress_trace.rename(lambda column_name: column_name+' RS')
+    rs_events = (progress_trace
+        .rename(lambda column_name: column_name+' RS')
         .filter(
             (pl.col('MESSAGE RS') == 'run service') &
             (pl.col('NODE RS') == 'CFS')
         )
-        .select(['TRANSACTION ID RS', 'TRACE ID RS', 'SERVICE RS', 'START RS', 'TIMESTAMP RS'])
+        .select(['TRANSACTION ID RS', 'TRACE ID RS', 'SERVICE RS', 'START RS', 'TIMESTAMP RS', 'DURATION RS'])
     )
 
    # Correlate push configuration events with applying transaction events
@@ -215,18 +232,19 @@ def main(args):
 
     # Find contained push configuration events query
 
-    push_events = (progress_trace.rename(lambda column_name: column_name+' PC')
+    push_events = (progress_trace
+        .rename(lambda column_name: column_name+' PC')
         .filter(
             (pl.col('MESSAGE PC') == 'push configuration') &
             (pl.col('NODE PC') == 'CFS')
         )
-        .select(['TRANSACTION ID PC', 'TRACE ID PC', 'DEVICE PC', 'START PC', 'TIMESTAMP PC'])
+        .select(['TRANSACTION ID PC', 'TRACE ID PC', 'START PC', 'TIMESTAMP PC', 'DURATION PC', 'ANNOTATION PC', 'DEVICE PC'])
     )
 
     # Correlate push configuration events with applying transaction events
 
     push_in_trans_events = (trans_events
-        .join(push_events,
+        .join(push_events, how='left',
             left_on=['TRANSACTION ID AT', 'TRACE ID AT'],
             right_on=['TRANSACTION ID PC', 'TRACE ID PC']
         )
@@ -250,10 +268,10 @@ def main(args):
         .filter(
             (pl.col('MESSAGE RAT') == 'applying transaction') &
             (pl.col('CONTEXT RAT') == 'netconf') &
-            (pl.col('NODE RAT') != 'CFS'
+            (pl.col('NODE RAT') != 'CFS')
             #(pl.col('DEVICE').is_not_null())
         )
-    ).select(['NODE RAT', 'DEVICE RAT', 'START RAT', 'TIMESTAMP RAT','TRANSACTION ID RAT', 'TRACE ID RAT'])
+        .select(['NODE RAT', 'TRANSACTION ID RAT', 'TRACE ID RAT', 'START RAT', 'TIMESTAMP RAT', 'DURATION RAT', 'ANNOTATION RAT'])
     )
 
     # Correlate RFS applying transaction events with CFS push configuration events
@@ -269,15 +287,15 @@ def main(args):
         )
     )
 
-    # COMMAND: rfs
+    # COMMAND: rfs-applying
 
-    if args.cmd == 'rfs':
+    if args.cmd == 'rfs-applying':
         print_query(cfs_rfs_events, args)
         return
 
-    # COMMAND: traceid-map
+    # COMMAND: rfs-traceid-map
 
-    if args.cmd == 'traceid-map':
+    if args.cmd == 'rfs-traceid-map':
         traceid_map = (cfs_rfs_events
             .select(['TRACE ID AT', 'TRACE ID RAT'])
             .group_by('TRACE ID AT', 'TRACE ID RAT').len().collect()
@@ -294,7 +312,8 @@ def main(args):
 
     # Find contained run service events query
 
-    rrs_events = (progress_trace.rename(lambda column_name: column_name+' RRS')
+    rrs_events = (progress_trace
+        .rename(lambda column_name: column_name+' RRS')
         .filter(
             (pl.col('MESSAGE RRS') == 'run service') &
             (pl.col('NODE RRS') != 'CFS')
@@ -322,15 +341,16 @@ def main(args):
     # Find devices that were pushed during a CFS push configuration
     # ------------------------------------------------------------------------------------
 
-    rfs_push_events = (progress_trace.rename(lambda column_name: column_name+' RPC')
+    rfs_push_events = (progress_trace
+        .rename(lambda column_name: column_name+' RPC')
         .filter(
             (pl.col('MESSAGE RPC') == 'push configuration') &
             (pl.col('NODE RPC') != 'CFS')
         )
-        .select(['TRACE ID RPC', 'NODE RPC', 'DEVICE RPC', 'START RPC', 'TIMESTAMP RPC'])
+        .select(['TRACE ID RPC', 'NODE RPC', 'START RPC', 'TIMESTAMP RPC', 'DURATION RPC', 'DEVICE RPC', 'ANNOTATION RPC'])
     )
     rfs_device_events = (cfs_rfs_events
-        .join(rfs_push_events, how='left',
+        .join(rfs_push_events, how='inner',
              left_on=['TRACE ID RAT', 'DEVICE PC'],
              right_on=['TRACE ID RPC', 'NODE RPC']
         )
@@ -351,28 +371,13 @@ def main(args):
             'DEVICE RPC'
         ])
 
-    # COMMAND: rfs-device
+    # COMMAND: rfs-push
 
-    if args.cmd == 'rfs-device':
+    if args.cmd == 'rfs-push':
         print_query(rfs_device_events, args, ['TRACE ID AT', 'DEVICE PC'])
         return
     
     print("ERROR: Command not implemented: " + args.cmd)
-
-
-    # ------------------------------------------------------------------------------------
-    # Find duplicated RFS applying transaction events during a CFS push configuration
-    # Most likely cause is that a dry-run was performed before the actual push
-
-    # duplicated_cfs_rfs_events = cfs_rfs_events.group_by('TRANSACTION ID').len().filter(
-    #     pl.col('len') > 1
-    # )
-    # print(duplicated_cfs_rfs_events.collect())
-
-    # duplicated_cfs_rfs_events = cfs_rfs_events.group_by('TRACE ID').len().filter(
-    #     pl.col('len') > 1
-    # )
-    # print(duplicated_cfs_rfs_events.collect())
 
 
 if __name__ == '__main__':
