@@ -70,33 +70,28 @@ def parse_filter(filter_str):
                 return operators[type(op)](eval_(left), eval_(right))
             case ast.BoolOp(op, comparators):
                 return reduce(lambda a,b: operators[type(op)](a,b), map(eval_, comparators))
-            case ast.Compare(left, [op, *o], [right, *r]):
+            case ast.Compare(left, ops, rights):
                 # Special case for None comparison to handle is_null and is_not_null
-                if type(op) == ast.Eq and right.value is None:
-                    return eval_(left).is_null()
-                elif type(op) == ast.NotEq and right.value is None:
-                    return eval_(left).is_not_null()
+                if len(ops) == 1:
+                    if type(op) == ast.Eq and right.value is None:
+                        return eval_(left).is_null()
+                    elif type(op) == ast.NotEq and right.value is None:
+                        return eval_(left).is_not_null()
                 # Polars doesn't support contant on the left side
                 # switch the left and right side and change the operator
-                if type(left) == ast.Constant:
-                    left, right = right, left
-                    op = switch[type(op)]
-                    switched = True
-                expr = operators[type(op)](eval_(left), eval_(right))
-                if len(o) > 0:
+                exprs = []
+                for op, right in zip(ops, rights):
+                    switched = False
+                    if type(left) == ast.Constant and type(right) == ast.Name:
+                        left, right = right, left
+                        op = switch[type(op)]
+                        switched = True
+                    exprs.append(operators[type(op)](eval_(left), eval_(right)))
                     if not switched:
                         left = right
-                    for op, right in zip(o, r):
-                        switched = False
-                        if type(left) == ast.Constant and type(right) == ast.Name:
-                            left, right = right, left
-                            op = switch[type(op)]
-                            switched = True
-                        expr = expr & (operators[type(op)](eval_(left), eval_(right)))
-                        if not switched:
-                            left = right
-                print(expr)
-                return expr
+                print(exprs)
+                # And all the expressions together and filter out True
+                return reduce(lambda a,b: a & b, filter(lambda a: a is not True, exprs))
             case r:
                 print("Unsupported:", r)
                 raise TypeError(node)
