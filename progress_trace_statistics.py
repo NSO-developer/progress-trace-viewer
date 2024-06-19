@@ -81,14 +81,21 @@ def parse_filter(filter_str):
                 if type(left) == ast.Constant:
                     left, right = right, left
                     op = switch[type(op)]
-                print("left", left)
-                print("op", op)
-                print("o", o)
-                print("right", right)
-                print("r", r)
+                    switched = True
                 expr = operators[type(op)](eval_(left), eval_(right))
                 if len(o) > 0:
-                    expr = expr & (operators[type(o[0])](eval_(left), eval_(r[0])))
+                    if not switched:
+                        left = right
+                    for op, right in zip(o, r):
+                        switched = False
+                        if type(left) == ast.Constant and type(right) == ast.Name:
+                            left, right = right, left
+                            op = switch[type(op)]
+                            switched = True
+                        expr = expr & (operators[type(op)](eval_(left), eval_(right)))
+                        if not switched:
+                            left = right
+                print(expr)
                 return expr
             case r:
                 print("Unsupported:", r)
