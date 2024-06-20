@@ -58,9 +58,20 @@ def fix_column_name(name):
     return name.replace('ANNOTATION' ,'ANN').replace('TRANSACTION ID', 'TID').replace('DURATION', 'DUR')
 
 
-def print_query(query, args, group_col='TRACE ID AT'):
+def print_query(query, args, group_col='TRACE ID AT', count_col=None):
     if args.count:
-        query = query.group_by(group_col).len()
+        if count_col is None:
+            print("Count not supported for this command.")
+            sys.exit(1)
+        query = (query
+            .with_columns([
+                pl.when(pl.col(count_col).is_null())
+                    .then(0)
+                    .otherwise(1)
+                    .name.suffix(' CNT')
+                ])
+            .group_by(group_col).agg(pl.col(count_col+' CNT').sum())
+        )
         if args.duplicates:
             query = query.filter(
                 pl.col('len') > 1
@@ -197,7 +208,7 @@ def main(args):
     # COMMAND: holding
 
     if args.cmd == 'holding':
-        print_query(hold_events, args, 'TRACE ID HTL')
+        print_query(hold_events, args, 'TRANSACTION ID HTL', 'TRACE ID HTL')
         return
 
 
@@ -250,6 +261,7 @@ def main(args):
     )
 
     if args.agg:
+        # TODO: Use same logic as for --count option?!
         # Aggregate run service events, store in trans_events for further processing
         trans_events = (rs_in_trans_events
             .group_by('TRACE ID AT')
@@ -290,7 +302,7 @@ def main(args):
     # COMMAND: push
 
     if args.cmd == 'push':
-        print_query(push_in_trans_events, args)
+        print_query(push_in_trans_events, args, count_col="DEVICE PC")
         return
 
 
@@ -332,6 +344,9 @@ def main(args):
 
     # COMMAND: rfs-traceid-map
 
+    # TODO: RFS device name should be part of the output, as trace-id may
+    #       be the same for different devices.
+    #       Use same logic as for --count option?!
     if args.cmd == 'rfs-traceid-map':
         traceid_map = (cfs_rfs_events
             .select(['TRACE ID AT', 'TRACE ID RAT'])
@@ -368,6 +383,7 @@ def main(args):
     )
 
     if args.agg:
+        # TODO: Use same logic as for --count option?!
         # Aggregate run service events, store in trans_events for further processing
         cfs_rfs_events = (rrs_in_trans_events
             .group_by('TRACE ID AT', 'SERVICE RS', 'RS CNT', 'DEVICE PC', 'TRACE ID RAT')
@@ -400,6 +416,8 @@ def main(args):
         )
     )
 
+    # TODO: Remove or refactor this option?!
+
     if args.simple:
         rfs_devices = rfs_device_events.select([
             'TRANSACTION ID AT',
@@ -416,6 +434,7 @@ def main(args):
         ])
 
     if args.agg:
+        # TODO: Use same logic as for --count option?!
         # Aggregate rfs push events, store in rfs_device_events (for further processing)
         rfs_device_events = (rfs_device_events
             .group_by('TRACE ID AT', 'SERVICE RS', 'RS CNT', 'DEVICE PC', 'TRACE ID RAT', 'SERVICE RRS', 'RRS CNT')
@@ -424,8 +443,10 @@ def main(args):
 
     # COMMAND: rfs-push
 
+    # TODO: Option to summarize per RFS or per trace-id?!
+
     if args.cmd == 'rfs-push':
-        print_query(rfs_device_events, args, ['TRACE ID AT', 'DEVICE PC'])
+        print_query(rfs_device_events, args, ['TRACE ID AT', 'DEVICE PC'], "DEVICE RPC")
         return
     
     print("ERROR: Command not implemented: " + args.cmd)
