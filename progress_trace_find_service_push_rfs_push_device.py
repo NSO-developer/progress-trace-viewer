@@ -67,7 +67,6 @@ def print_query(query, args, group_col='TRACE ID AT'):
             )
     if args.filter is not None:
         query = query.filter(args.filter_expr)
-        print(args.filter_expr)
     if not args.show_ts:
         query = query.select(list(filter(lambda x: not x.startswith('TIMESTAMP'), query.columns)))
     query = query.rename(fix_column_name)
@@ -76,13 +75,24 @@ def print_query(query, args, group_col='TRACE ID AT'):
     else:
         query.write_csv(args.output, separator=',')
 
-def parse_filter(filter_str):
-    operators = {ast.Eq: pl.Expr.eq, ast.NotEq: pl.Expr.ne, ast.Lt: pl.Expr.lt, ast.Gt: pl.Expr.gt,
-                 ast.LtE: pl.Expr.le, ast.GtE: pl.Expr.ge, ast.BitAnd: pl.Expr.and_, ast.BitOr: pl.Expr.or_, 
-                 ast.Or: pl.Expr.or_, ast.And: pl.Expr.and_}
 
-    def eval_expr(expr):
-        return eval_(ast.parse(expr, mode='eval').body)
+def parse_filter(expr):
+    operators = {
+        ast.Eq: pl.Expr.eq,
+        ast.NotEq: pl.Expr.ne,
+        ast.Lt: pl.Expr.lt,
+        ast.Gt: pl.Expr.gt,
+        ast.LtE: pl.Expr.le,
+        ast.GtE: pl.Expr.ge,
+        ast.Or: pl.Expr.or_,
+        ast.And: pl.Expr.and_
+    }
+    switch = {
+        ast.Lt: ast.Gt(),
+        ast.Gt: ast.Lt(),
+        ast.LtE: ast.GtE(),
+        ast.GtE: ast.LtE()
+    }
 
     def eval_(node):
         match node:
@@ -94,19 +104,33 @@ def parse_filter(filter_str):
                 return operators[type(op)](eval_(left), eval_(right))
             case ast.BoolOp(op, comparators):
                 return reduce(lambda a,b: operators[type(op)](a,b), map(eval_, comparators))
-            case ast.Compare(left, [op, *r], [right, *_]):
-                if len(r) > 0:
-                    raise TypeError(node)
-                if type(op) == ast.Eq and right.value is None:
-                    return eval_(left).is_null()
-                elif type(op) == ast.NotEq and right.value is None:
-                    return eval_(left).is_not_null()
-                return operators[type(op)](eval_(left), eval_(right))
+            case ast.Compare(left, ops, rights):
+                # Special case for None comparison to handle is_null and is_not_null
+                if len(ops) == 1:
+                    op, right = ops[0], rights[0]
+                    if type(op) == ast.Eq and right.value is None:
+                        return eval_(left).is_null()
+                    elif type(op) == ast.NotEq and right.value is None:
+                        return eval_(left).is_not_null()
+                # Polars doesn't support contant on the left side
+                # switch the left and right side and change the operator
+                exprs = []
+                for op, right in zip(ops, rights):
+                    switched = False
+                    if type(left) == ast.Constant and type(right) == ast.Name:
+                        left, right = right, left
+                        op = switch[type(op)]
+                        switched = True
+                    exprs.append(operators[type(op)](eval_(left), eval_(right)))
+                    if not switched:
+                        left = right
+                # And all the expressions together and filter out True
+                return reduce(lambda a,b: a & b, filter(lambda a: a is not True, exprs))
             case r:
                 print("Unsupported:", r)
                 raise TypeError(node)
             
-    return eval_expr(filter_str)
+    return eval_(ast.parse(expr, mode='eval').body)
 
 
 def main(args):
