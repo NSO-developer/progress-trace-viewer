@@ -5,16 +5,16 @@ Exporter tools for more.
 """
 
 # TODO:
-# - Create specifig progress trace reader.
-#   - Handle different versions and empty fields.
 # - Add follow.
-# - Add begin and end timestamp filters.
-# - Add transaction id filter.
-# - Handle empty timestamps.
-# - Handle device names. Filter on device.
-# - Handle operational transactions.
-# - Handle spans.ß
-# - Handle service names/types.
+# - Create specifig progress trace reader. ✅
+#   - Handle different versions and empty fields.
+#   - Handle empty timestamps.
+#   - Handle device names. Filter on device.
+#   - Handle spans.
+#   - Handle service names/types.
+# - Filters:
+#   - Add begin and end timestamp filters.
+#   - Add transaction id filter.
 
 
 import argparse
@@ -39,29 +39,27 @@ def parseArgs(args=None):
             help="Follow file and graph as traces come.")
     parser.add_argument('file', type=str, nargs='?',
             help='File to process.')
-
+    # Filter options
     parser.add_argument('--oper', action='store_true', default=False,
             help='Graph operational transactions.')
-    
-    
-    parser.add_argument('--events', type=str,
-            help='Read events to filter from file.')
-    parser.add_argument('--tid', type=str,
-            help='Filter on transaction id(s).')
-    parser.add_argument('--ctid', type=str,
-            help='Color transaction id(s).')
-    parser.add_argument('-b', '--begin', type=str,
-            help='Start timestamp')
-    parser.add_argument('-e', '--end', type=str,
-            help='End timestamp')
-    parser.add_argument('--write', type=str,
-            help='Write the progress trace events to file.')
-    parser.add_argument('--realtime', action='store_true', default=False,
-            help='Skip view updates and sleeps during parsing.')
-    parser.add_argument('--speedup', type=int, default=1,
-            help='Speedup realtime view n times.')
-    parser.add_argument('-t', '--timestamp', action='store_true', default=False,
-            help='Show start timestamp.')
+#    parser.add_argument('--events', type=str,
+#            help='Read events to filter from file.')
+#    parser.add_argument('--tid', type=str,
+#            help='Filter on transaction id(s).')
+#    parser.add_argument('--ctid', type=str,
+#            help='Color transaction id(s).')
+#    parser.add_argument('-b', '--begin', type=str,
+#            help='Start timestamp')
+#    parser.add_argument('-e', '--end', type=str,
+#            help='End timestamp')
+#    parser.add_argument('--write', type=str,
+#            help='Write the progress trace events to file.')
+#    parser.add_argument('--realtime', action='store_true', default=False,
+#            help='Skip view updates and sleeps during parsing.')
+#    parser.add_argument('--speedup', type=int, default=1,
+#            help='Speedup realtime view n times.')
+#    parser.add_argument('-t', '--timestamp', action='store_true', default=False,
+#            help='Show start timestamp.')
 
     return parser.parse_args(args)
 
@@ -76,6 +74,20 @@ class nso_progress_trace(csv.Dialect):
     quoting = csv.QUOTE_MINIMAL
 csv.register_dialect("nso_progress_trace", nso_progress_trace)
 
+
+class ProgressTraceReader:
+    def __init__(self, f, *args, **kwds):
+        self.reader = csv.reader(f, dialect='nso_progress_trace')
+        self.capabilities, self.fieldnames = detect_pt_capabilities(self.reader)
+        if self.capabilities is None:
+            raise RuntimeError("Couldn't detect progress trace capabilities.")
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return next(self.reader)
+    
 
 def detect_pt_capabilities(csvreader):
     try:
@@ -108,7 +120,7 @@ def graph_progress_trace(args, csvreader, capabilities, fieldnames):
     tids_color = {}
 
     # Set column positions as local variables
-    event_num = ts_num = dur_num = tid_num = msg_num = span_num = trace_num =\
+    event_num = ts_num = dur_num = trid_num = msg_num = span_num =\
     pspan_num = sess_num = tid_num = ds_num = srv_num = attr_num = False
     if 'EVENT TYPE' in fieldnames:
         event_num = fieldnames['EVENT TYPE']
@@ -117,7 +129,7 @@ def graph_progress_trace(args, csvreader, capabilities, fieldnames):
     if 'DURATION' in fieldnames:
         dur_num = fieldnames['DURATION']
     if 'TRACE ID' in fieldnames:
-        trace_num = fieldnames['TRACE ID']
+        trid_num = fieldnames['TRACE ID']
     if 'SPAN ID' in fieldnames:
         span_num = fieldnames['SPAN ID']
     if 'PARENT SPAN ID' in fieldnames:
@@ -153,7 +165,7 @@ def graph_progress_trace(args, csvreader, capabilities, fieldnames):
         ts = datetime.fromisoformat(l[ts_num]).timestamp()
         duration = float(l[dur_num]) if l[dur_num] else 0.0
 
-        trid = l[trace_num][-12:] if trace_num else ''
+        trid = l[trid_num][-12:] if trid_num else ''
         span = l[span_num] if span_num else ''
         pspan = l[pspan_num] if pspan_num else ''
         sid = l[sess_num] if sess_num else ''
@@ -206,12 +218,8 @@ def main(args):
         print(f"ERROR: Permission denied to read {args.file}.")
         sys.exit(1)
     with open(args.file, 'r') as csvfile:
-        reader = csv.reader(csvfile, dialect='nso_progress_trace')
-        capabilities, fieldnames = detect_pt_capabilities(reader)
-        if capabilities is None:
-            print(f"ERROR: {args.file} Couldn't detect column names.")
-            sys.exit(1)
-        graph_progress_trace(args, reader, capabilities, fieldnames)
+        reader = ProgressTraceReader(csvfile)
+        graph_progress_trace(args, reader, reader.capabilities, reader.fieldnames)
 
 
 if __name__ == '__main__':
