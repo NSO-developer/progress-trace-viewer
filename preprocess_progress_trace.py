@@ -40,6 +40,7 @@ ADDITIONAL_FIELDNAMES = [
     'ACTION',
     'DEVICE',
     'DEVICE_PHASE',
+    'PACKAGE',
     'SERVICE',
     'SERVICE_OPERATION',
     'SERVICE_PHASE',
@@ -84,7 +85,9 @@ def main(args):
             an = row['ATTRIBUTE NAME']
             if an != "":
                 last_row[an.upper()] = row['ATTRIBUTE VALUE']
-        if last_row:
+        if last_row is not None:
+            del last_row['ATTRIBUTE NAME']
+            del last_row['ATTRIBUTE VALUE']
             writer.writerow(last_row)
     except KeyboardInterrupt:
         print()
