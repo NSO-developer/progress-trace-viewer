@@ -20,17 +20,18 @@ Exporter tools for more.
 import argparse
 import csv
 from datetime import datetime
-from os import access, R_OK
+from os import access, R_OK, SEEK_END
 from os.path import exists, isfile
 import sys
+from time import sleep
+from rich import print as rprint
 from rich.bar import Bar
-from rich.console import Group
+from rich.color import Color
+from rich.console import Console, Group
+from rich.live import Live
+from rich.style import Style
 from rich.table import Table
 from rich.text import Text
-from rich.color import Color
-from rich.style import Style
-from rich.console import Console
-from rich import print
 
 
 def parseArgs(args=None):
@@ -61,6 +62,9 @@ def parseArgs(args=None):
 #    parser.add_argument('-t', '--timestamp', action='store_true', default=False,
 #            help='Show start timestamp.')
 
+    parser.add_argument('--version', action='version', version='%(prog)s 0.1')
+    parser.add_argument('--detect', action='store_true', default=False,
+            help='Detect NSO version producing progress trace.')
     return parser.parse_args(args)
 
 
@@ -77,10 +81,12 @@ csv.register_dialect("nso_progress_trace", nso_progress_trace)
 
 class ProgressTraceReader:
     def __init__(self, f, *args, **kwds):
+        self.f = f
         self.reader = csv.reader(f, dialect='nso_progress_trace')
-        self.capabilities, self.fieldnames = detect_pt_capabilities(self.reader)
-        if self.capabilities is None:
-            raise RuntimeError("Couldn't detect progress trace capabilities.")
+        self.capabilities, self.fieldnames, self.version = \
+            detect_pt_capabilities(self.reader)
+        # if self.capabilities is None:
+        #     raise RuntimeError("Couldn't detect progress trace capabilities.")
 
     def __iter__(self):
         return self
@@ -94,16 +100,21 @@ def detect_pt_capabilities(csvreader):
         fieldnames = { n: p for p,n in enumerate(next(csvreader)) }
         capabilities = set()
         if 'EVENT TYPE' in fieldnames:
-            capabilities.add('start') # Supported in version 5.4-
+            capabilities.add('duration') # Supported in version 5.4-
+            version = '5.4-5.6'
+        else:
+            return None, None, '-5.3'
         if 'TRACE ID' in fieldnames:
             capabilities.add('traces') # Supported in version 5.7-
+            version = '5.7-6.0'
         if 'SPAN ID' in fieldnames:
             capabilities.add('spans') # Supported in version 6.1-
+            version = '6.1-'
         if not capabilities:
-            return None, None
-        return capabilities, fieldnames
+            return None, None, None
+        return capabilities, fieldnames, version
     except StopIteration:
-        return None, None
+        return None, None, None
 
 
 def graph_progress_trace(args, csvreader, capabilities, fieldnames):
@@ -156,7 +167,21 @@ def graph_progress_trace(args, csvreader, capabilities, fieldnames):
                      max_width=(int(Console().width)-12-60-8-15),
                      no_wrap=True)
 
-    for l in csvreader:
+    def follow(reader):
+        '''generator function that yields new lines in a file as they are written'''
+        while True:
+            try:
+                yield next(reader)
+            except StopIteration:
+                sleep(0.1)
+    if args.follow:
+        csvreader.f.seek(0, SEEK_END)
+        reader = follow(csvreader)
+    else:
+        reader = csvreader
+
+    #with Live(table) as live:
+    for l in reader:
         if l[0] == '': # Skip empty lines, for now
             continue
         if not oper and l[ds_num] == 'operational':
@@ -201,7 +226,7 @@ def graph_progress_trace(args, csvreader, capabilities, fieldnames):
         s.size = size
     span_duration.plain = f'Span {size*1000:0.3f} ms'
     console = Console()
-    print(table, flush=True)
+    rprint(table, flush=True)
 
 
 def main(args):
@@ -219,6 +244,16 @@ def main(args):
         sys.exit(1)
     with open(args.file, 'r') as csvfile:
         reader = ProgressTraceReader(csvfile)
+        if args.detect:
+            print(f"Detected NSO progress trace version: {reader.version}")
+            print(f"Capabilities: {reader.capabilities}")
+            sys.exit(0)
+        if reader.version == '-5.3':
+            print("ERROR: Progress trace version -5.3 is not supported.")
+            sys.exit(1)
+        if reader.capabilities is None:
+            print("ERROR: Couldn't detect progress trace capabilities.")
+            sys.exit(1)
         graph_progress_trace(args, reader, reader.capabilities, reader.fieldnames)
 
 
