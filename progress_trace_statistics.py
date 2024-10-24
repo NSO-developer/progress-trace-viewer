@@ -14,6 +14,8 @@ def parseArgs(args):
     parser = argparse.ArgumentParser()
     parser.add_argument('file', type=str,
         help='File to process.')
+    parser.add_argument('--msg', type=str,
+        help='Message(s) to filter.')
     parser.add_argument('-f', '--filter', type=str,
         help='Filter expression.')
     parser.add_argument('-s', '--sort', type=str,
@@ -162,7 +164,7 @@ def sprintf(s, fmt):
     return pl.select(expr).to_series() if isinstance(s, pl.Series) else expr
 
 
-def get_statistics(progress_trace, datastore='running'):
+def get_statistics(progress_trace, args, datastore='running'):
     progress_trace = progress_trace.filter(
             (pl.col('DATASTORE') == datastore) &
             (pl.col('EVENT TYPE') == 'stop') &
@@ -170,6 +172,9 @@ def get_statistics(progress_trace, datastore='running'):
                                                                  # as they contains dependant information
         )
     )
+
+    if args.msg is not None:
+        progress_trace = progress_trace.filter(pl.col('MESSAGE').is_in(args.msg.split(',')))
 
     duration_grouped_by_message = (progress_trace
         .group_by('MESSAGE')
@@ -197,7 +202,7 @@ def main(args):
     pl.Config().set_tbl_rows(1000)
     pl.Config().set_fmt_str_lengths(100)
 
-    statistics = get_statistics(progress_trace)
+    statistics = get_statistics(progress_trace, args)
 
     if args.filter is not None:
         statistics = statistics.filter(parse_filter(args.filter))
