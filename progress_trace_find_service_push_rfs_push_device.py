@@ -261,7 +261,6 @@ def main(args):
     )
 
     if args.agg:
-        # TODO: Use same logic as for --count option?!
         # Aggregate run service events, store in trans_events for further processing
         trans_events = (rs_in_trans_events
             .group_by('TRACE ID AT')
@@ -299,6 +298,12 @@ def main(args):
         )
     )
 
+    if args.agg:
+        # Aggregate run service events, store in trans_events for further processing
+        push_in_trans_events = (push_in_trans_events
+            .group_by('TRACE ID AT')
+            .agg('SERVICE RS', pl.count('SERVICE RS').alias('RS CNT'))
+        )
     # COMMAND: push
 
     if args.cmd == 'push':
