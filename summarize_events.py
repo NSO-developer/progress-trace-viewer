@@ -128,6 +128,9 @@ def main(args):
     bt_locks_max = bt_locks["DURATION"].max()
 
     t_events = d[d['MESSAGE'] == args.event]
+    if len(t_events) == 0:
+        print(f"ERROR: No events of type '{args.event}' found.")
+        sys.exit(2)
     t_cnt = t_events[t_events['EVENT TYPE'] == 'start']['EVENT TYPE'].count()
     first_ts = t_events[t_events['EVENT TYPE'] == 'start'].iloc[0]['TIMESTAMP']
     last_ts = t_events[t_events['EVENT TYPE'] == 'stop'].iloc[-1]['TIMESTAMP']
