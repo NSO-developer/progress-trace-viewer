@@ -1,2 +1,6 @@
 venv/
 nso/
+__pycache__/
+l/
+scripts/
+
