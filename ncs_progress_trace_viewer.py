@@ -98,20 +98,20 @@ class ProgressTraceReader:
 def detect_pt_capabilities(csvreader):
     try:
         fieldnames = { n: p for p,n in enumerate(next(csvreader)) }
-        capabilities = set()
-        if 'EVENT TYPE' in fieldnames:
-            capabilities.add('duration') # Supported in version 5.4-
-            version = '5.4-5.6'
-        else:
-            return None, None, '-5.3'
-        if 'TRACE ID' in fieldnames:
-            capabilities.add('traces') # Supported in version 5.7-
-            version = '5.7-6.0'
-        if 'SPAN ID' in fieldnames:
-            capabilities.add('spans') # Supported in version 6.1-
-            version = '6.1-'
-        if not capabilities:
-            return None, None, None
+        capabilities = None
+        version = None
+        if 'TIMESTAMP' in fieldnames:
+            version = '-5.3'
+            capabilities = set()        
+            if 'EVENT TYPE' in fieldnames:
+                capabilities.add('duration') # Supported in version 5.4-
+                version = '5.4-5.6'
+            if 'TRACE ID' in fieldnames:
+                capabilities.add('traces') # Supported in version 5.7-
+                version = '5.7-6.0'
+            if 'SPAN ID' in fieldnames:
+                capabilities.add('spans') # Supported in version 6.1-
+                version = '6.1-'
         return capabilities, fieldnames, version
     except StopIteration:
         return None, None, None
