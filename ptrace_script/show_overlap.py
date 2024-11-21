@@ -22,8 +22,16 @@ def parseArgs(args):
     return parser.parse_args(args)
 
 
-
-def process_overlap(args, progress_trace):
+def main(pt, hide_rows, show_spans, find_spans, event):
+    progress_trace = pt.filter(
+                        (pl.col('TIMESTAMP') != '') &
+                        (pl.col('DATASTORE') == 'running') &
+                        (pl.col('MESSAGE') == event)
+    )
+    if find_spans:
+        hide_rows = True
+        show_spans = True
+        
     spans = {}
 
     for fields in progress_trace.collect().iter_rows(named=True):
@@ -34,29 +42,17 @@ def process_overlap(args, progress_trace):
         if et == 'start':
             #if tid not in spans: continue # ignore start events that are not in progress
             spans[tid] = 1
-            if not args.hide_rows:
+            if not hide_rows:
                 print(f"{ts}  {len(spans)} {m}")
-            if args.show_spans and len(spans.keys())>1:
+            if show_spans and len(spans.keys())>1:
                 print(spans)
         elif et == 'stop':
             spans.pop(tid, None) # No exception if tid not found
-            if not args.hide_rows:
+            if not hide_rows:
                 print(f"{ts}  {len(spans)} {m}")
-        p_ts = ts
-        p_tid = tid
-
-
-def main(args):
-    progress_trace = pl.scan_csv(args.file).filter(
-                            (pl.col('TIMESTAMP') != '') &
-                            (pl.col('DATASTORE') == 'running') &
-                            (pl.col('MESSAGE') == args.event)
-    )
-    if args.find_spans:
-        args.hide_rows = True
-        args.show_spans = True
-    process_overlap(args, progress_trace)
-
+        
 
 if __name__ == '__main__':
-    main(parseArgs(sys.argv[1:]))
+    args = parseArgs(sys.argv[1:])
+    progress_trace = pl.scan_csv(args.file)
+    main(progress_trace, args.hide_rows, args.show_spans, args.find_spans, args.event)

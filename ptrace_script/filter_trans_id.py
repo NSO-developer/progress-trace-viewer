@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
-from datetime import datetime
 import sys
-import time
 
 import polars as pl
 
@@ -18,20 +16,25 @@ def parseArgs(args):
     return parser.parse_args(args)
 
 
-def main_polars(args):
-    progress_trace = pl.scan_csv(args.file).filter(
-                            (pl.col('TIMESTAMP') != '') &
-                            (pl.col('TRANSACTION ID') == args.transid)
-                            )
+def main_polars(pt, trans_id):
+    progress_trace = pt.filter(
+                        (pl.col('TIMESTAMP') != '') &
+                        (pl.col('TRANSACTION ID') == trans_id)
+                        )
+    
 
-    result = progress_trace.collect()
+    return progress_trace.collect()
 
+if __name__ == '__main__':
+    args = parseArgs(sys.argv[1:])
+    progress_trace = pl.scan_csv(args.file)
+    result = main_polars(progress_trace, args.transid)
+        
     pl.Config().set_tbl_rows(1000)
 
     if args.output:
         result.write_csv(args.output, separator=',')
     else:
-        print(result)
-
-if __name__ == '__main__':
-    main_polars(parseArgs(sys.argv[1:]))
+        with pl.Config(tbl_cols=-1):
+            print(result)
+    
