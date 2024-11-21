@@ -23,22 +23,23 @@ def parseArgs(args):
     return parser.parse_args(args)
 
 
-def main(args):
-    progress_trace = (pl.scan_csv(args.file)
-                .filter((pl.col('TIMESTAMP') != '') &
-                        (pl.col('PARENT SPAN ID').is_null()) &
-                        (pl.col('EVENT TYPE') == 'stop'))
-    )
-    if args.event:
-        progress_trace = progress_trace.filter(pl.col('MESSAGE') == args.event)
+def main(pt, event):
+    progress_trace = pt.filter((pl.col('TIMESTAMP') != '') &
+                                (pl.col('PARENT SPAN ID').is_null()) &
+                                (pl.col('EVENT TYPE') == 'stop'))
+    
+    if event:
+        progress_trace = progress_trace.filter(pl.col('MESSAGE') == event)
 
-    pl.Config().set_tbl_rows(1000)
 
-    data = progress_trace.select(['MESSAGE', 'EVENT TYPE', 'DURATION',
+    return progress_trace.select(['MESSAGE', 'EVENT TYPE', 'DURATION',
                                   'TRANSACTION ID', 'ATTRIBUTE NAME',
                                   'ATTRIBUTE VALUE']).sort('DURATION',
                                  descending=True).collect()
 
-    print(data)    
 if __name__ == '__main__':
-    main(parseArgs(sys.argv[1:]))
+    args = parseArgs(sys.argv[1:])
+    progress_trace = pl.scan_csv(args.file)
+    result = main(progress_trace, args.event)
+    pl.Config().set_tbl_rows(1000)
+    print(result)

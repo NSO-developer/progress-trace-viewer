@@ -15,11 +15,12 @@ def parseArgs(args):
 
 
 def get_statistics(progress_trace, datastore='running'):
+    progress_trace = progress_trace.filter(pl.col('TIMESTAMP') != '')
+
     d = progress_trace.filter((pl.col('DATASTORE') == datastore) &
                 (pl.col('EVENT TYPE') == 'stop') &
                 ~(pl.col('MESSAGE').str.starts_with('check conflict'))
     )
-
 
     duration_grouped_by_message = d.group_by('MESSAGE').agg([
                     pl.col('MESSAGE').len().alias('COUNT'),
@@ -30,22 +31,16 @@ def get_statistics(progress_trace, datastore='running'):
                     pl.col('DURATION').max().alias('MAX')
                     ])
 
-    return duration_grouped_by_message.collect().sort('MESSAGE')
+    return duration_grouped_by_message.collect().sort('MAX')
 
 
 def main(args):
-    progress_trace = pl.scan_csv(args.file).filter(
-                            (pl.col('TIMESTAMP') != '')
-    )
+    progress_trace = pl.scan_csv(args.file)
 
     pl.Config().set_tbl_rows(1000)
 
     print("=== RUNNING ===")
     print(get_statistics(progress_trace))
-#    print("\n=== NO DATASTORE ===")
-#    print(get_statistics(progress_trace, ''))
-#    print("\n=== OPERATIONAL ===")
-#    print(get_statistics(progress_trace, 'operational'))
 
 if __name__ == '__main__':
     main(parseArgs(sys.argv[1:]))
