@@ -174,59 +174,63 @@ def graph_progress_trace(args, csvreader, capabilities, fieldnames):
                 yield next(reader)
             except StopIteration:
                 sleep(0.1)
+
     if args.follow:
         csvreader.f.seek(0, SEEK_END)
         reader = follow(csvreader)
     else:
         reader = csvreader
 
-    #with Live(table) as live:
-    for l in reader:
-        if l[0] == '': # Skip empty lines, for now
-            continue
-        if not oper and l[ds_num] == 'operational':
-            continue
-        event_type = l[event_num]
-        ts = datetime.fromisoformat(l[ts_num]).timestamp()
-        duration = float(l[dur_num]) if l[dur_num] else 0.0
+    with Live(table, auto_refresh=False) as live:
+        for l in reader:
+            event_type = l[event_num]
+            if event_type == '':
+                # Skip empty lines, for now (attibute values)
+                continue
+            if not oper and l[ds_num] == 'operational':
+                # Skip operational transactions, for now
+                continue
+            ts = datetime.fromisoformat(l[ts_num]).timestamp()
+            duration = float(l[dur_num]) if l[dur_num] else 0.0
 
-        trid = l[trid_num][-12:] if trid_num else ''
-        span = l[span_num] if span_num else ''
-        pspan = l[pspan_num] if pspan_num else ''
-        sid = l[sess_num] if sess_num else ''
-        tid = l[tid_num] if tid_num else ''
-        msg = l[msg_num] if msg_num else ''
-        srv = l[srv_num] if srv_num else ''
-        attr = l[attr_num] if attr_num else ''
-        key = f'{trid}{span}{pspan}{sid}{tid}{srv}{attr}{msg}'
+            trid = l[trid_num][-12:] if trid_num else ''
+            span = l[span_num] if span_num else ''
+            pspan = l[pspan_num] if pspan_num else ''
+            sid = l[sess_num] if sess_num else ''
+            tid = l[tid_num] if tid_num else ''
+            msg = l[msg_num] if msg_num else ''
+            srv = l[srv_num] if srv_num else ''
+            attr = l[attr_num] if attr_num else ''
+            # Can SPAN ID used as key, when available?
+            key = f'{trid}{span}{pspan}{sid}{tid}{srv}{attr}{msg}'
 
-        if begin == 0.0:
-            begin = ts
-        size = ts - begin
-        if event_type == 'start':
-            if trid not in tids_color:
-                color = Color.from_ansi(color_numbers.pop(0))
-                tids_color[trid] = color
+            if begin == 0.0:
+                begin = ts
+            size = ts - begin
+            if event_type == 'start':
+                if trid not in tids_color:
+                    color = Color.from_ansi(color_numbers.pop(0))
+                    tids_color[trid] = color
+                else:
+                    color=tids_color[trid]
+                span = Bar(begin=size, end=size, size=size, color=color)
+                desc = Text('', style=Style(color=color))
+                rtid = Text(trid, style=Style(color=color))
+                rtext= Text(f'{msg} {tid}', style=Style(color=color))
+                spans[key] = span, desc
+                table.add_row(rtid, rtext, desc, span)
+            elif event_type == 'stop' and key in spans:
+                span, desc = spans[key]
+                desc.append(f'{duration*1000:0.3f}')
+                span.end = span.end + duration
+                for s, _ in spans.values():
+                    s.size = size
+                span_duration.plain = f'Span {size*1000:0.3f} ms'
             else:
-                color=tids_color[trid]
-            span = Bar(begin=size, end=size, size=size, color=color)
-            d = Text('', style=Style(color=color))
-            rtid = Text(trid, style=Style(color=color))
-            rtext= Text(f'{msg} {tid}', style=Style(color=color))
-            spans[key] = span, d
-            table.add_row(rtid, rtext, d, span)
-        elif event_type == 'stop' and key in spans:
-            s, d = spans[key]
-            d.append(f'{duration*1000:0.3f}')
-            s.end = size
-        else:
-            continue
+                continue
+            if args.follow:
+                live.refresh()
 
-    for s, _ in spans.values():
-        s.size = size
-    span_duration.plain = f'Span {size*1000:0.3f} ms'
-    console = Console()
-    rprint(table, flush=True)
 
 
 def main(args):
