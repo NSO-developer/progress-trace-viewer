@@ -132,7 +132,7 @@ def main(args):
         print(f"ERROR: No events of type '{args.event}' found.")
         sys.exit(2)
     t_cnt = t_events[t_events['EVENT TYPE'] == 'start']['EVENT TYPE'].count()
-    first_ts = t_events[t_events['EVENT TYPE'] == 'start'].iloc[0]['TIMESTAMP']
+    first_ts = d.iloc[0]['TIMESTAMP']
     last_ts = t_events[t_events['EVENT TYPE'] == 'stop'].iloc[-1]['TIMESTAMP']
     delta = (last_ts-first_ts).total_seconds()
     htl_starts = htl_events[htl_events['EVENT TYPE'] == lock_et]
