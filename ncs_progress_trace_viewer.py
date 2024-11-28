@@ -5,10 +5,10 @@ Exporter tools for more.
 """
 
 # TODO:
-# - Add follow.
+# - Add follow. ✅
 # - Create specifig progress trace reader. ✅
-#   - Handle different versions and empty fields.
-#   - Handle empty timestamps.
+#   - Handle different versions and empty fields. (ongoing)
+#   - Handle empty timestamps. ✅
 #   - Handle device names. Filter on device.
 #   - Handle spans.
 #   - Handle service names/types.
@@ -43,6 +43,8 @@ def parseArgs(args=None):
     # Filter options
     parser.add_argument('--oper', action='store_true', default=False,
             help='Graph operational transactions.')
+    parser.add_argument('--color-trid', action='store_true', default=False,
+            help='Color trace-ids instead of transaction-ids.')
 #    parser.add_argument('--events', type=str,
 #            help='Read events to filter from file.')
 #    parser.add_argument('--tid', type=str,
@@ -208,11 +210,12 @@ def graph_progress_trace(args, csvreader, capabilities, fieldnames):
                 begin = ts
             size = ts - begin
             if event_type == 'start':
-                if trid not in tids_color:
+                cid = trid if args.color_trid else tid
+                if cid not in tids_color:
                     color = Color.from_ansi(color_numbers.pop(0))
-                    tids_color[trid] = color
+                    tids_color[cid] = color
                 else:
-                    color=tids_color[trid]
+                    color=tids_color[cid]
                 span = Bar(begin=size, end=size, size=size, color=color)
                 desc = Text('', style=Style(color=color))
                 rtid = Text(trid, style=Style(color=color))
@@ -246,20 +249,23 @@ def main(args):
     if not access(args.file, R_OK):
         print(f"ERROR: Permission denied to read {args.file}.")
         sys.exit(1)
-    with open(args.file, 'r') as csvfile:
-        reader = ProgressTraceReader(csvfile)
-        if args.detect:
-            print(f"Detected NSO progress trace version: {reader.version}")
-            print(f"Capabilities: {reader.capabilities}")
-            sys.exit(0)
-        if reader.version == '-5.3':
-            print("ERROR: Progress trace version -5.3 is not supported.")
-            sys.exit(1)
-        if reader.capabilities is None:
-            print("ERROR: Couldn't detect progress trace capabilities.")
-            sys.exit(1)
-        graph_progress_trace(args, reader, reader.capabilities, reader.fieldnames)
-
+    try:
+        with open(args.file, 'r') as csvfile:
+            reader = ProgressTraceReader(csvfile)
+            if args.detect:
+                print(f"Detected NSO progress trace version: {reader.version}")
+                print(f"Capabilities: {reader.capabilities}")
+                sys.exit(0)
+            if reader.version == '-5.3':
+                print("ERROR: Progress trace version -5.3 is not supported.")
+                sys.exit(1)
+            if reader.capabilities is None:
+                print("ERROR: Couldn't detect progress trace capabilities.")
+                sys.exit(1)
+            graph_progress_trace(args, reader, reader.capabilities, reader.fieldnames)
+    except KeyboardInterrupt:
+        print("Interrupted by user.")
+        sys.exit(1)
 
 if __name__ == '__main__':
     main(parseArgs())
