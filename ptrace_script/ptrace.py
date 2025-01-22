@@ -21,6 +21,7 @@ class PtraceParser():
     def __init__(self):
         
         self.parser.add_argument('-f', '--file', type=str, help='File to process.')
+        self.parser.add_argument('-r', '--rows', type=int, default=1000, help='Number of rows to display.')
         
         l = [(f"{n} {s}",h) for n,s,h in self.subparsers.cmds]
         maxl = max(len(s) for s,_ in l)
@@ -185,14 +186,15 @@ def show_span(args):
     print_progress_trace(result)
     
 def print_progress_trace(pt):
-    pl.Config().set_tbl_rows(1000)
+    pl.Config().set_tbl_rows(n_rows)
     with pl.Config(tbl_cols=-1):
         print(pt)
 
 def main():
     my_parser = PtraceParser()
     args = my_parser.parser.parse_args()
-    
+    global n_rows
+    n_rows = args.rows
     if args.command is None:
         my_parser.parser.print_help()
     else:
