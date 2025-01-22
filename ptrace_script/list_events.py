@@ -16,17 +16,19 @@ def parseArgs(args):
     return parser.parse_args(args)
 
 
-def main_polars(args):
-    prefix = '-' if args.negate else ''
+def main_polars(pt, negate=False):
+    prefix = '-' if negate else '' # TODO?
 
-    progress_trace = pl.scan_csv(args.file).filter(
-                            (pl.col('TIMESTAMP') != '') &
-                            (pl.col('DATASTORE') == 'running') &
-                            (pl.col('EVENT TYPE') ==
-                             'stop')).group_by('MESSAGE').len()
+    progress_trace = pt.filter(
+                        (pl.col('TIMESTAMP') != '') &
+                        (pl.col('DATASTORE') == 'running') &
+                        (pl.col('EVENT TYPE') ==
+                        'stop')).group_by('MESSAGE').len()
 
     for message, count in progress_trace.collect().iter_rows():
        print(f'{message: <50} {count: >7}')
 
 if __name__ == '__main__':
-    main_polars(parseArgs(sys.argv[1:]))
+    args = parseArgs(sys.argv[1:])
+    progress_trace = pl.scan_csv(args.file)
+    main_polars(progress_trace, args.negate)

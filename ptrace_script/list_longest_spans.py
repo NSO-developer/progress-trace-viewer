@@ -13,7 +13,7 @@ def parseArgs(args):
     parser.add_argument('file', type=str,
             help='File to process.')
     parser.add_argument('-e', '--event', type=str,
-            help='File to process.')
+            help='Event name')
     parser.add_argument('--show-spans', action="store_true", default=False,
             help='Show spans when there is an overlap')
     parser.add_argument('--find-spans', action="store_true", default=False,
@@ -23,13 +23,12 @@ def parseArgs(args):
     return parser.parse_args(args)
 
 
-def main(args):
-    progress_trace = (pl.scan_csv(args.file)
-                .filter((pl.col('TIMESTAMP') != '') &
-                        (pl.col('DURATION').is_not_null()))
+def main(pt, event):
+    progress_trace = pt.filter((pl.col('TIMESTAMP') != '') &
+                        (pl.col('DURATION').is_not_null())
     )
-    if args.event:
-        progress_trace = progress_trace.filter(pl.col('MESSAGE') == args.event)
+    if event:
+        progress_trace = progress_trace.filter(pl.col('MESSAGE') == event)
 
     pl.Config().set_tbl_rows(1000)
 
@@ -37,9 +36,13 @@ def main(args):
         'MESSAGE',
         'DURATION',
         'TRANSACTION ID',
-        'ATTRIBUTE VALUE'
+        #'ATTRIBUTE VALUE'
         ]).sort('DURATION', descending=True).collect()
-
-    print(data)    
+    
+    return data
+ 
 if __name__ == '__main__':
-    main(parseArgs(sys.argv[1:]))
+    args = parseArgs(sys.argv[1:])
+    progress_trace = pl.scan_csv(args.file)
+    data = main(progress_trace, args.event)
+    print(data)
