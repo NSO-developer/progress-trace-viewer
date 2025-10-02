@@ -220,10 +220,11 @@ def main_polars(args):
             'DURATION',
             'TRANSACTION ID',
             'TRACE ID', 
-            'NODE', 
             'DEVICE',
             'SERVICE',
         ]
+        if 'NODE' in progress_trace.columns:
+            columns.append('NODE')
         if args.start:
             columns.append('START')
 
@@ -233,9 +234,10 @@ def main_polars(args):
             'MESSAGE',
             'ANNOTATION',
             'CONTEXT',
-            'NODE', 
             'DEVICE', 
         ]
+        if 'NODE' in progress_trace.columns:
+            columns.append('NODE')
 
     result = result.select(columns)
     pl.Config().set_tbl_rows(args.rows)
