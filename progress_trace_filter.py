@@ -12,7 +12,7 @@ import time
 import polars as pl
 
 def parseArgs(args):
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(prefix_chars='-+')
     parser.add_argument('file', type=str,
             help='File to process.')
     parser.add_argument('--tid', type=str,
@@ -57,6 +57,8 @@ def parseArgs(args):
             help='Verbose output.')
     parser.add_argument('--group', type=str,
             help='Column(s) to group on.')
+    parser.add_argument('+c', dest='addcols', action='append',
+            help='Additional column(s) to include in output. Repeatable or comma-separated.')
 
     return parser.parse_args(args)
 
@@ -208,7 +210,7 @@ def main_polars(args):
         print(progress_trace)
 
     result = progress_trace.collect()
-    columns = progress_trace.columns
+    columns = progress_trace.collect_schema().names()
 
     if args.mincols:
         columns = [
@@ -238,6 +240,15 @@ def main_polars(args):
         ]
         if 'NODE' in progress_trace.columns:
             columns.append('NODE')
+
+    # Append additional columns requested via +c (if valid and not already present)
+    if getattr(args, 'addcols', None):
+        extras = []
+        for s in args.addcols:
+            extras += [c.strip() for c in s.split(',') if c.strip()]
+        for c in extras:
+            if c in progress_trace.columns and c not in columns:
+                columns.append(c)
 
     result = result.select(columns)
     pl.Config().set_tbl_rows(args.rows)

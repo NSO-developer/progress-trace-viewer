@@ -132,6 +132,7 @@ def main(args):
         print(f"ERROR: No events of type '{args.event}' found.")
         sys.exit(2)
     t_cnt = t_events[t_events['EVENT TYPE'] == 'start']['EVENT TYPE'].count()
+    t_cnt_error = t_events[(t_events['EVENT TYPE'] == 'stop') & (t_events['ANNOTATION'] == 'error')]['EVENT TYPE'].count()
     first_ts = d.iloc[0]['TIMESTAMP']
     last_ts = t_events[t_events['EVENT TYPE'] == 'stop'].iloc[-1]['TIMESTAMP']
     delta = (last_ts-first_ts).total_seconds()
@@ -145,6 +146,7 @@ def main(args):
 
     print()
     print(f"Number of actions:              {t_cnt}")
+    print(f"Number of errors:               {t_cnt_error}")
     print(f"Total time:                     {delta:.1f} s")
     print(f"Total number of locks:          {htl_cnt}")
     print(f"Total time inside locks:        {htl_sum:.1f} s")

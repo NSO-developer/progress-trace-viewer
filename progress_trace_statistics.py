@@ -20,6 +20,8 @@ def parseArgs(args):
         help='Filter expression.')
     parser.add_argument('-s', '--sort', type=str,
         help='Sort column(s).')
+    parser.add_argument('-a', '--annotation', action='store_true',
+        help='Group by ANNOTATION in addition to MESSAGE.')
     return parser.parse_args(args)
 
 
@@ -176,8 +178,9 @@ def get_statistics(progress_trace, args, datastore='running'):
     if args.msg is not None:
         progress_trace = progress_trace.filter(pl.col('MESSAGE').is_in(args.msg.split(',')))
 
+    group_cols = ['MESSAGE'] + (['ANNOTATION'] if args.annotation else [])
     duration_grouped_by_message = (progress_trace
-        .group_by('MESSAGE')
+        .group_by(group_cols)
         .agg([
             pl.col('MESSAGE').len().alias('COUNT'),
             pl.col('DURATION').sum().alias('SUM'),

@@ -37,13 +37,19 @@ def process_overlap(args, progress_trace):
             #if tid not in spans: continue # ignore start events that are not in progress
             spans[tid] = 1
             if not args.hide_rows:
-                print(f"{ts}  {len(spans)} {m}  {' '.join(map(str, spans.keys()))}")
+                print(f"{ts}  {len(spans)} {m}", end='')
             if args.show_spans and len(spans.keys())>1:
-                print(spans)
+                print(f"  {' '.join(map(str, spans.keys()))}")
+            else:
+                print()
         elif et == 'stop':
             spans.pop(tid, None) # No exception if tid not found
             if not args.hide_rows:
-                print(f"{ts}  {len(spans)} {m}  {' '.join(map(str, spans.keys()))}")
+                print(f"{ts}  {len(spans)} {m}", end='')    
+            if args.show_spans and len(spans.keys())>1:
+                print(f"  {' '.join(map(str, spans.keys()))}")
+            else:
+                print()
         p_ts = ts
         p_tid = tid
 
