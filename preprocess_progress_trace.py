@@ -3,9 +3,7 @@
 import argparse
 import csv
 from datetime import datetime
-import os
 import sys
-import time
 
 """
 Run with --setup to setup the progress tracing:
@@ -38,6 +36,7 @@ def extract_fieldnames(line):
 
 ADDITIONAL_FIELDNAMES = [
     'ACTION',
+    'COMMIT_QUEUE_ID',
     'DEVICE',
     'DEVICE_PHASE',
     'PACKAGE',
