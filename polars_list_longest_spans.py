@@ -33,7 +33,7 @@ def main(args):
     base_filter = [
         pl.col('EVENT TYPE') == 'stop',
         pl.col('TIMESTAMP') != '', # Filter out empty timestamps for non pre-processed trace files.
-        pl.col('DURATION').is_not_null(),
+        pl.col('DURATION').is_not_null(), # Should not be needed for stop events?!
     ]
     filter = []
     if args.event:
@@ -55,6 +55,7 @@ def main(args):
     ranked = (f_progress_trace
         .select([
             'MESSAGE',
+            'CONTEXT',
             'TRACE ID',
             'SPAN ID',
             'DURATION',
@@ -113,37 +114,55 @@ def main(args):
         .sort('DURATION_1', descending=True)
     )
 
+    # Timeline-based overlap calculation (memory efficient)
+    # Get all root spans with their time ranges
+    root_spans = (
+        all_progress_trace
+        .filter([
+            pl.col("PARENT SPAN ID").is_null() |
+            pl.col("MESSAGE").is_in(["restconf edit"])
+        ])
+        .select(["TRACE ID", "START_TIME", "END_TIME"])
+    )
+    
+    # Create events for each span: +1 at start, -1 at end
+    events = pl.concat([
+        root_spans.select([
+            pl.col("START_TIME").alias("time"),
+            pl.col("TRACE ID"),
+            pl.lit(1).alias("delta")  # +1 when span starts
+        ]),
+        root_spans.select([
+            pl.col("END_TIME").alias("time"),
+            pl.col("TRACE ID"),
+            pl.lit(-1).alias("delta")  # -1 when span ends
+        ])
+    ], how="vertical").sort("time", "delta")  # Sort by time, then by delta (ends before starts at same time)
+    
+    # Calculate cumulative active spans at each event
+    events_with_counts = events.with_columns(
+        pl.col("delta").cum_sum().alias("active_before")
+    ).with_columns(
+        (pl.col("active_before") - pl.col("delta")).alias("active_after")
+    )
+    
+    # For each trace, find the maximum number of concurrent spans during its lifetime
+    # Join root_spans with events to find overlaps
     overlap = (
-        data
+        root_spans
         .join(
-            all_progress_trace.filter([ # Filter to get all root spans
-                pl.col("PARENT SPAN ID").is_null() |
-                # restconf edit message have a parent span id set (but shouldn't).
-                pl.col("MESSAGE").is_in(["restconf edit"])
-            ]),
-            how="cross",
-            suffix="_right"
+            events_with_counts.filter(pl.col("delta") == 1),  # Only look at start events
+            left_on="TRACE ID",
+            right_on="TRACE ID",
+            how="left"
         )
-        .filter(
-            (pl.col("TRACE ID") != pl.col("TRACE ID_right")) &
-            (
-                (   # Find spans partly overlapping at the start
-                    (pl.col("START_TIME") < pl.col("END_TIME_right")) &
-                    (pl.col("END_TIME") >= pl.col("END_TIME_right"))
-                ) |
-                (   # Find spans completely contained
-                    (pl.col("START_TIME") <= pl.col("START_TIME_right")) &
-                    (pl.col("END_TIME") >= pl.col("END_TIME_right"))
-                ) |
-                (   # Find spans partly overlapping at the end
-                    (pl.col("END_TIME") > pl.col("START_TIME_right")) &
-                    (pl.col("END_TIME") <= pl.col("END_TIME_right"))
-                )
-            )
-        )
-        .group_by(["TRACE ID"])
+        .with_columns([
+            # Count overlapping spans: spans active when this span started, minus itself
+            (pl.col("active_before") - 1).alias("overlap_at_start")
+        ])
+        .group_by("TRACE ID")
         .agg(
-            pl.len().alias("OVERLAP_COUNT")
+            pl.col("overlap_at_start").max().alias("OVERLAP_COUNT")
         )
         .select(["TRACE ID", "OVERLAP_COUNT"])
     )
@@ -152,6 +171,7 @@ def main(args):
         data
         .select([
             'MESSAGE_1',
+            'CONTEXT',
             'TRACE ID',
             'SPAN ID_1',
             'DURATION_1',
