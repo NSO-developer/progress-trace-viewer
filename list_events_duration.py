@@ -55,7 +55,7 @@ def main(args):
         tid = fields['TRANSACTION ID']
         msg = fields['MESSAGE']
         ann = fields['ANNOTATION']
-        print(f"{ts}  {msg}  {dur:10.1f}  {dev:20} {tid:10} {ann}")
+        print(f"{ts}  {msg}  {dur:10.1f}  {dev:20} {tid:10.0f}  {ann}")
 
 
 if __name__ == '__main__':
