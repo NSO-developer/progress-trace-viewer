@@ -166,14 +166,17 @@ def sprintf(s, fmt):
     return pl.select(expr).to_series() if isinstance(s, pl.Series) else expr
 
 
-def get_statistics(progress_trace, args, datastore='running'):
+def get_statistics(progress_trace, args, datastore=None):
     progress_trace = progress_trace.filter(
-            (pl.col('DATASTORE') == datastore) &
             (pl.col('EVENT TYPE') == 'stop') &
            ~(pl.col('MESSAGE').str.starts_with('check conflict') # filter out check conflict messages
                                                                  # as they contains dependant information
         )
     )
+    if datastore is not None:
+        progress_trace = progress_trace.filter(
+                (pl.col('DATASTORE') == datastore)
+        )
 
     if args.msg is not None:
         progress_trace = progress_trace.filter(pl.col('MESSAGE').is_in(args.msg.split(',')))
