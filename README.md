@@ -39,11 +39,11 @@ progress trace in CSV format:
 </config>
 ```
 
-Save the configuration as `progress-trace.xml` and load it into NSO with
-`ncs_load`:
+Save the configuration as `progress-trace-config.xml` and load it into NSO with
+`ncs_load`
 
 ```console
-ncs_load -lm progress-trace.xml
+ncs_load -lm progress-trace-config.xml
 ```
 
 Alternatively, configure the trace from the NSO CLI:
