@@ -1,261 +1,324 @@
 #!/usr/bin/env python3
 
+"""A simple progress trace viewer example. See the NSO Observability
+Exporter tools for more.
+"""
+
+# TODO:
+# - Add follow. ✅
+# - Create specifig progress trace reader. ✅
+#   - Handle different versions and empty fields. (ongoing)
+#   - Handle empty timestamps. ✅
+#   - Handle device names. Filter on device.
+#   - Handle spans.
+#   - Handle service names/types.
+# - Filters:
+#   - Add begin and end timestamp filters.
+#   - Add transaction id filter.
+
+
 import argparse
 import csv
 from datetime import datetime
-import os
+from os import access, R_OK, SEEK_END
+from os.path import exists, isfile
 import sys
-import time
-
-from rich.live import Live
+from time import sleep
+from rich import print as rprint
 from rich.bar import Bar
-from rich.console import Group
+from rich.color import Color
+from rich.console import Console, Group
+from rich.live import Live
+from rich.style import Style
 from rich.table import Table
 from rich.text import Text
-from rich.color import Color
 
 
-"""
-Run with --setup to setup the progress tracing:
-
-progress trace debug
- destination file progress-trace.csv
- destination format csv
- enabled
- verbosity debug
-!
-"""
-
-def parseArgs(args):
+def parseArgs(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('-f', '--follow', action='store_true', default=False,
             help="Follow file and graph as traces come.")
-    parser.add_argument('-o', action='store_true', default=False,
-            help='Graph operational transactions.')
     parser.add_argument('file', type=str, nargs='?',
             help='File to process.')
-    parser.add_argument('--setup', action='store_true', default=False,
-            help='Config progress trace in NSO.')
-    parser.add_argument('--filter', type=str,
-            help='Read events to filter from file.')
-    parser.add_argument('--tid', type=str,
-            help='Filter on transaction id.')
-    parser.add_argument('--write', type=str,
-            help='Write the progress trace events to file.')
-    parser.add_argument('--interactive', action='store_true', default=False,
-            help='Skip view updates and sleeps during parsing.')
+    # Filter options
+    parser.add_argument('--oper', action='store_true', default=False,
+            help='Graph operational transactions.')
+    parser.add_argument('--bw', action='store_true', default=False,
+            help='Just black and white.')
+    parser.add_argument('--color-trid', action='store_true', default=False,
+            help='Color trace-ids instead of transaction-ids.')
+    parser.add_argument('--show-span-ids', action='store_true', default=False,
+            help='Show columns with span id and parent span id.')
+    parser.add_argument('--msg-filter', type=str, metavar='FILE',
+            help='File containing message names to filter on (one per line).')
+#    parser.add_argument('--events', type=str,
+#            help='Read events to filter from file.')
+#    parser.add_argument('--tid', type=str,
+#            help='Filter on transaction id(s).')
+#    parser.add_argument('--ctid', type=str,
+#            help='Color transaction id(s).')
+#    parser.add_argument('-b', '--begin', type=str,
+#            help='Start timestamp')
+#    parser.add_argument('-e', '--end', type=str,
+#            help='End timestamp')
+#    parser.add_argument('--write', type=str,
+#            help='Write the progress trace events to file.')
+#    parser.add_argument('--realtime', action='store_true', default=False,
+#            help='Skip view updates and sleeps during parsing.')
+#    parser.add_argument('--speedup', type=int, default=1,
+#            help='Speedup realtime view n times.')
+#    parser.add_argument('-t', '--timestamp', action='store_true', default=False,
+#            help='Show start timestamp.')
+
+    parser.add_argument('--version', action='version', version='%(prog)s 0.1')
+    parser.add_argument('--detect', action='store_true', default=False,
+            help='Detect NSO version producing progress trace.')
     return parser.parse_args(args)
 
 
-def setup_progress_trace(args):
+class nso_progress_trace(csv.Dialect):
+    """Describe the usual properties of NSO-generated progress trace CSV files."""
+    delimiter = ','
+    quotechar = '"'
+    doublequote = True
+    skipinitialspace = False
+    lineterminator = '\n'
+    quoting = csv.QUOTE_MINIMAL
+csv.register_dialect("nso_progress_trace", nso_progress_trace)
+
+
+class ProgressTraceReader:
+    def __init__(self, f, *args, **kwds):
+        self.f = f
+        self.reader = csv.reader(f, dialect='nso_progress_trace')
+        self.capabilities, self.fieldnames, self.version = \
+            detect_pt_capabilities(self.reader)
+        # if self.capabilities is None:
+        #     raise RuntimeError("Couldn't detect progress trace capabilities.")
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return next(self.reader)
+    
+
+def detect_pt_capabilities(csvreader):
     try:
-        import ncs
-        with ncs.maapi.single_write_trans('admin', 'test_context') as t:
-            r = ncs.maagic.get_root(t)
-            pt = r.progress.trace.create('debug')
-            pt.destination.file = 'progress-trace.csv'
-            pt.destination.format = 'csv'
-            pt.enabled = True
-            pt.verbosity = 'debug'
-            t.apply()
+        fieldnames = { n: p for p,n in enumerate(next(csvreader)) }
+        capabilities = None
+        version = None
+        if 'TIMESTAMP' in fieldnames:
+            version = '-5.3'
+            capabilities = set()        
+            if 'EVENT TYPE' in fieldnames:
+                capabilities.add('duration') # Supported in version 5.4-
+                version = '5.4-5.6'
+            if 'TRACE ID' in fieldnames:
+                capabilities.add('traces') # Supported in version 5.7-
+                version = '5.7-6.0'
+            if 'SPAN ID' in fieldnames:
+                capabilities.add('spans') # Supported in version 6.1-
+                version = '6.1-'
+        return capabilities, fieldnames, version
+    except StopIteration:
+        return None, None, None
 
 
-    except ImportError:
-        print("ERROR: Failed to import module ncs.")
-        print("Have you sourced ncsrc?")
-        sys.exit(1)
+def load_filter_messages(filter_file):
+    """Load message names from a filter file, one per line."""
+    messages = set()
+    with open(filter_file, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#'):
+                messages.add(line)
+    return messages
 
 
-def mk_color_numbers():
-    return list(filter(lambda i: not i in [4, 16, 17, 18], [i for i in range(1, 232)]))
+def graph_progress_trace(args, csvreader, capabilities, fieldnames):
+    oper = args.oper
+    filter_messages = load_filter_messages(args.msg_filter) if args.msg_filter else None
 
-
-color_numbers = []
-def get_color():
-    global color_numbers
-    if not color_numbers:
-        color_numbers = mk_color_numbers()
-    return Color.from_ansi(color_numbers.pop(0))
-
-
-def follow(thefile):
-    '''generator function that yields new lines in a file
-    '''
-    thefile.seek(0, os.SEEK_END)
-
-    # start infinite loop
-    while True:
-        line = thefile.readline()
-        if not line:
-            time.sleep(0.1)
-            continue
-
-        yield line
-
-
-def read_events(filename):
-    events = []
-    for l in open(filename, 'r'):
-        e = l.strip()
-        if e and e[0] not in '#-':
-            events.append(e)
-    return events
-
-
-def get_table(tids = None, span_header="Span"):
-    table = Table(title="NSO Traces")
-    table.add_column("Event", min_width=20, no_wrap=True)
-    table.add_column("TId", min_width=3, no_wrap=True)
-    table.add_column("Duration", min_width=10, no_wrap=True)
-    table.add_column(span_header, width=120, no_wrap=True)
-    if tids is not None:
-        for tid, spans in tids.items():
-            for text, d, span in spans:
-                table.add_row(f'{text} {tid}', d, span)
-    return table
-
-
-def graph_progress_trace(args, f, events):
+    color_numbers = list(
+                      filter(
+                        lambda i: not i in [4, 16, 17, 18],
+                        [i for i in range(1, 232)]))
     begin = 0.0
     size = 0.0
-    last = 0.0
-
     bars = Group()
     spans = {}
-    tids = {}
     tids_color = {}
-    spans_running = {}
-    held_locks = {}
+
+    # Set column positions as local variables
+    event_num = ts_num = dur_num = trid_num = msg_num = span_num =\
+    pspan_num = sess_num = tid_num = ds_num = srv_num = attr_num = False
+    if 'EVENT TYPE' in fieldnames:
+        event_num = fieldnames['EVENT TYPE']
+    if 'TIMESTAMP' in fieldnames:
+        ts_num = fieldnames['TIMESTAMP']
+    if 'DURATION' in fieldnames:
+        dur_num = fieldnames['DURATION']
+    if 'TRACE ID' in fieldnames:
+        trid_num = fieldnames['TRACE ID']
+    if 'SPAN ID' in fieldnames:
+        span_num = fieldnames['SPAN ID']
+    if 'PARENT SPAN ID' in fieldnames:
+        pspan_num = fieldnames['PARENT SPAN ID']
+    if 'SESSION ID' in fieldnames:
+        sess_num = fieldnames['SESSION ID']
+    if 'TRANSACTION ID' in fieldnames:
+        tid_num = fieldnames['TRANSACTION ID']
+    if 'DATASTORE' in fieldnames:
+        ds_num = fieldnames['DATASTORE']
+    if 'MESSAGE' in fieldnames:
+        msg_num = fieldnames['MESSAGE']
+    if 'SERVICE' in fieldnames:
+        srv_num = fieldnames['SERVICE']
+    if 'ATTRIBUTE VALUE' in fieldnames:
+        attr_num = fieldnames['ATTRIBUTE VALUE']
+ 
+    table = Table(title=f'Progress Trace {args.file}')
+    table.add_column("Trace ID", width=12, no_wrap=True)
+    if args.show_span_ids:
+        table.add_column("Span ID", width=12, no_wrap=True)
+        table.add_column("PSpan ID", width=12, no_wrap=True)
+    table.add_column("Event [Transaction ID]", min_width=40, max_width=60)
+    table.add_column("Duration", min_width=8, no_wrap=True)
     span_duration = Text(" Span 0.0 ms")
-    table = get_table(span_header=span_duration)
+    table.add_column(span_duration,
+                     max_width=(int(Console().width)-12-60-8-15),
+                     no_wrap=True)
 
-    writer = None
-    if args.write:
-        writer = open(args.write, 'w')
-    if args.tid:
-        if ',' in args.tid:
-            args.tid = args.tid.split(',')
-        else:
-            args.tid = [ args.tid ]
+    def follow(reader):
+        '''generator function that yields new lines in a file as they are written'''
+        while True:
+            try:
+                yield next(reader)
+            except StopIteration:
+                sleep(0.1)
 
-    def new_span(text, key, tid):
-        if tid not in tids_color:
-            color=get_color()
-            tids_color[tid] = color
-        else:
-            color=tids_color[tid]
-        span = Bar(begin=size, end=size, size=size, color=color)
-        spans_running[key] = span
-        d = Text('')
-        spans[key] = span, d
-        if tid not in tids:
-            tids[tid] = [(text, d, span)]
-        else:
-            tids[tid].append((text, d, span))
-        table.add_row(text, tid, d, span)
+    if args.follow:
+        csvreader.f.seek(0, SEEK_END)
+        reader = follow(csvreader)
+    else:
+        reader = csvreader
 
-    def end_span(key, duration):
-        s, d = spans[key]
-        d.append(f'{duration*1000:0.3f}')
-        s.end = size
-        if key in spans_running:
-            del spans_running[key]
+    traces_to_filter = {
+            'running action': ( attr_num, '/nso-dbg/beam-state/get-metrics')
+    }
+    filtered_traces = set()
 
-    with Live(table) as live:
-        header = None
-        for line in f:
-            if writer:
-                writer.write(line)
-            l = list(csv.reader([line]))[0]
-            if len(l) == 17:
-                have_trace_id = -6
-                have_span_id = 3
-            elif len(l) == 18:
-                have_trace_id = -1
-                have_span_id = 0
-            elif len(l) == 19:
-                have_trace_id = 0
-                have_span_id = 0
-            elif len(l) == 21:
-                have_trace_id = 2
-                have_span_id = 3
-            else:
-                print("ERROR: Unsupported number of columns in progress trace"+
-                     f"{len(l)}")
-            if header is None:
-                if l[0] == 'EVENT TYPE':
-                    header = l
-                    continue
+    with Live(table, auto_refresh=False) as live:
+        for l in reader:
+            event_type = l[event_num]
+            if event_type == '':
+                # Skip empty lines, for now (attibute values)
+                continue
+            if not oper and l[ds_num] == 'operational':
+                # Skip operational transactions, for now
+                continue
+            ts = datetime.fromisoformat(l[ts_num]).timestamp()
+            duration = float(l[dur_num]) if l[dur_num] else 0.0
+
+            trid = l[trid_num][-12:] if trid_num else ''
+            spid = l[span_num] if span_num else ''
+            pspid = l[pspan_num] if pspan_num else ''
+            sid = l[sess_num] if sess_num else ''
+            tid = l[tid_num] if tid_num else ''
+            msg = l[msg_num] if msg_num else ''
+            srv = l[srv_num] if srv_num else ''
+            attr = l[attr_num] if attr_num else ''
+            # Filter on message names if --filter is specified
+            if filter_messages and msg not in filter_messages:
+                continue
+
+            # Can SPAN ID used as key, when available?
+            key = f'{trid}{spid}{pspid}{sid}{tid}{srv}{attr}{msg}'
+
+            nxt = False
+            if event_type == 'start':
+                if trid in filtered_traces: continue
+                for m,(a,v) in traces_to_filter.items():
+                    if msg == m and l[a] == v:
+                        filtered_traces.add(trid)
+                        nxt = True
+                        break
+                if nxt: continue
+                if begin == 0.0:
+                    begin = ts
+                size = ts - begin
+                if args.bw:
+                    color = Color.parse("bright_white")
                 else:
-                    header = 'No header.'
-            if not args.o and l[5+have_span_id] == 'operational':
+                    cid = trid if args.color_trid else tid
+                    if cid not in tids_color:
+                        color = Color.from_ansi(color_numbers.pop(0))
+                        tids_color[cid] = color
+                    else:
+                        color=tids_color[cid]
+                span = Bar(begin=size, end=size, size=size, color=color)
+                desc = Text('', style=Style(color=color))
+                rtid = Text(trid, style=Style(color=color))
+                rtext= Text(f'{msg} {tid}', style=Style(color=color))
+                spans[key] = span, desc
+                if not args.show_span_ids:
+                    table.add_row(rtid, rtext, desc, span)
+                else:
+                    table.add_row(rtid, spid, pspid, rtext, desc, span)
+            elif event_type == 'stop':
+                for m,(a,v) in traces_to_filter.items():
+                    if msg == m and l[a] == v:
+                        filtered_traces.remove(trid)
+                        nxt = True
+                        break
+                if nxt: continue
+                if trid in filtered_traces: continue
+                size = ts - begin
+                if key in spans:
+                    span, desc = spans[key]
+                    desc.append(f'{duration:0.3f}')
+                    span.end = span.end + duration
+                    for s, _ in spans.values():
+                        s.size = size
+                    span_duration.plain = f'Span {size:0.3f}'
+            else:
                 continue
-            if events is not None and l[17+have_trace_id] not in events:
-                continue
-            tag = l[0]
-            ts = datetime.fromisoformat(l[1]).timestamp()
-            duration = float(l[2]) if l[2] else 0.0
-            tid = l[4+have_span_id]
-            key = '-'.join([tid]+l[11+have_trace_id:18+have_trace_id])
-            text = l[17+have_trace_id]
-
-            if args.tid and tid not in args.tid:
-                continue
-
-            if begin == 0.0:
-                begin = ts
-                last = ts
-            size = ts-begin
-            if tag == 'start':
-                new_span(text, key, tid)
-            elif tag == 'stop' and key in spans:
-                end_span(key, duration)
-                if text == 'grabbing transaction lock':
-                    ftext = 'holding transaction lock'
-                    fkey = tid+'-'+ftext
-                    new_span(ftext, fkey, tid)
-                    held_locks[tid] = ts
-            elif tag == 'info' and text == 'releasing transaction lock':
-                ftext = 'holding transaction lock'
-                fkey = tid+'-'+ftext
-                if fkey in spans:
-                    sts = held_locks.pop(tid)
-                    fduration = ts-sts
-                    end_span(fkey, fduration)
-            for s, d in spans.values():
-                s.size = size
-            for s in spans_running.values():
-                s.end = size
-            span_duration.plain = f'Span {size*1000:0.3f} ms'
-            if (args.follow or last-ts>0.1) and args.interactive:
+            if args.follow:
                 live.refresh()
-            if not args.follow and args.interactive and last:
-                delay = ts-last
-                if delay > 0:
-                    time.sleep(delay)
-            last = ts
-        live.refresh()
+
 
 
 def main(args):
-    if args.setup:
-        setup_progress_trace(args)
-        sys.exit(0)
     if args.file is None:
-        print("You must specify a file to process.")
+        print("ERROR: No file provided.")
         sys.exit(1)
-    events = None
-    if args.filter is not None:
-        events = read_events(args.filter)
-    f = open(args.file, 'r')
-    if args.follow:
-        f = follow(f)
+    if not exists(args.file):
+        print(f"ERROR: {args.file} does not exist.")
+        sys.exit(1)
+    if not isfile(args.file):
+        print(f"ERROR: {args.file} is not a file.")
+        sys.exit(1)
+    if not access(args.file, R_OK):
+        print(f"ERROR: Permission denied to read {args.file}.")
+        sys.exit(1)
     try:
-        graph_progress_trace(args, f, events)
+        with open(args.file, 'r') as csvfile:
+            reader = ProgressTraceReader(csvfile)
+            if args.detect:
+                print(f"Detected NSO progress trace version: {reader.version}")
+                print(f"Capabilities: {reader.capabilities}")
+                sys.exit(0)
+            if reader.version == '-5.3':
+                print("ERROR: Progress trace version -5.3 is not supported.")
+                sys.exit(1)
+            if reader.capabilities is None:
+                print("ERROR: Couldn't detect progress trace capabilities.")
+                sys.exit(1)
+            graph_progress_trace(args, reader, reader.capabilities, reader.fieldnames)
     except KeyboardInterrupt:
-        print()
-        print("Stopped")
-
+        print("Interrupted by user.")
+        sys.exit(1)
 
 if __name__ == '__main__':
-    main(parseArgs(sys.argv[1:]))
+    main(parseArgs())
