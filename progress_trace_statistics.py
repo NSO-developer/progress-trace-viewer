@@ -16,6 +16,8 @@ def parseArgs(args):
         help='File to process.')
     parser.add_argument('--msg', type=str,
         help='Message(s) to filter.')
+    parser.add_argument('--msg-filter', type=str,
+        help='File with messages to filter. One per line.')
     parser.add_argument('-f', '--filter', type=str,
         help='Filter expression.')
     parser.add_argument('-s', '--sort', type=str,
@@ -98,6 +100,17 @@ def parse_filter(expr):
     return eval_(ast.parse(expr, mode='eval').body)
 
 
+def load_filter_messages(filter_file):
+    """Load message names from a filter file, one per line."""
+    messages = set()
+    with open(filter_file, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#'):
+                messages.add(line)
+    return messages
+
+    
 def sprintf(s, fmt):
     """
     Convert a polars series to string format
@@ -181,6 +194,10 @@ def get_statistics(progress_trace, args, datastore=None):
     if args.msg is not None:
         progress_trace = progress_trace.filter(pl.col('MESSAGE').is_in(args.msg.split(',')))
 
+    if args.msg_filter is not None:
+        filter_messages = load_filter_messages(args.msg_filter)
+        progress_trace = progress_trace.filter(pl.col('MESSAGE').is_in(filter_messages))
+
     group_cols = ['MESSAGE'] + (['ANNOTATION'] if args.annotation else [])
     duration_grouped_by_message = (progress_trace
         .group_by(group_cols)
@@ -208,10 +225,11 @@ def main(args):
     pl.Config().set_tbl_rows(1000)
     pl.Config().set_fmt_str_lengths(100)
 
+    if args.filter is not None:
+        progress_trace = progress_trace.filter(parse_filter(args.filter))
+
     statistics = get_statistics(progress_trace, args)
 
-    if args.filter is not None:
-        statistics = statistics.filter(parse_filter(args.filter))
     if args.sort is not None:
         statistics = statistics.sort(args.sort.split(','))
 

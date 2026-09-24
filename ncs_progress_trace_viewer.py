@@ -49,7 +49,7 @@ def parseArgs(args=None):
             help='Color trace-ids instead of transaction-ids.')
     parser.add_argument('--show-span-ids', action='store_true', default=False,
             help='Show columns with span id and parent span id.')
-    parser.add_argument('--filter', type=str, metavar='FILE',
+    parser.add_argument('--msg-filter', type=str, metavar='FILE',
             help='File containing message names to filter on (one per line).')
 #    parser.add_argument('--events', type=str,
 #            help='Read events to filter from file.')
@@ -138,7 +138,7 @@ def load_filter_messages(filter_file):
 
 def graph_progress_trace(args, csvreader, capabilities, fieldnames):
     oper = args.oper
-    filter_messages = load_filter_messages(args.filter) if args.filter else None
+    filter_messages = load_filter_messages(args.msg_filter) if args.msg_filter else None
 
     color_numbers = list(
                       filter(
