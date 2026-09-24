@@ -15,7 +15,7 @@ def parseArgs(args):
     parser.add_argument('file', type=str,
             help='File to process.')
     parser.add_argument('--event', type=str,
-            help='File to process.')
+            help='Event to process.')
     parser.add_argument('--show-spans', action="store_true", default=False,
             help='Show spans when there is an overlap')
     parser.add_argument('--show-tid', action="store_true", default=False,
