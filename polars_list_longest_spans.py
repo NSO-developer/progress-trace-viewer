@@ -88,6 +88,7 @@ def main(args):
             'START_TIME',
             'TRACE ID',
             'SPAN ID',
+            'TRANSACTION ID',
             'DURATION',
         ])
         .with_columns(
@@ -172,6 +173,7 @@ def main(args):
         .select([
             'MESSAGE_1',
             'CONTEXT',
+            'TRANSACTION ID',
             'TRACE ID',
             'SPAN ID_1',
             'DURATION_1',
