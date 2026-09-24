@@ -43,8 +43,14 @@ def parseArgs(args=None):
     # Filter options
     parser.add_argument('--oper', action='store_true', default=False,
             help='Graph operational transactions.')
+    parser.add_argument('--bw', action='store_true', default=False,
+            help='Just black and white.')
     parser.add_argument('--color-trid', action='store_true', default=False,
             help='Color trace-ids instead of transaction-ids.')
+    parser.add_argument('--show-span-ids', action='store_true', default=False,
+            help='Show columns with span id and parent span id.')
+    parser.add_argument('--filter', type=str, metavar='FILE',
+            help='File containing message names to filter on (one per line).')
 #    parser.add_argument('--events', type=str,
 #            help='Read events to filter from file.')
 #    parser.add_argument('--tid', type=str,
@@ -119,8 +125,20 @@ def detect_pt_capabilities(csvreader):
         return None, None, None
 
 
+def load_filter_messages(filter_file):
+    """Load message names from a filter file, one per line."""
+    messages = set()
+    with open(filter_file, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#'):
+                messages.add(line)
+    return messages
+
+
 def graph_progress_trace(args, csvreader, capabilities, fieldnames):
     oper = args.oper
+    filter_messages = load_filter_messages(args.filter) if args.filter else None
 
     color_numbers = list(
                       filter(
@@ -162,6 +180,9 @@ def graph_progress_trace(args, csvreader, capabilities, fieldnames):
  
     table = Table(title=f'Progress Trace {args.file}')
     table.add_column("Trace ID", width=12, no_wrap=True)
+    if args.show_span_ids:
+        table.add_column("Span ID", width=12, no_wrap=True)
+        table.add_column("PSpan ID", width=12, no_wrap=True)
     table.add_column("Event [Transaction ID]", min_width=40, max_width=60)
     table.add_column("Duration", min_width=8, no_wrap=True)
     span_duration = Text(" Span 0.0 ms")
@@ -183,6 +204,11 @@ def graph_progress_trace(args, csvreader, capabilities, fieldnames):
     else:
         reader = csvreader
 
+    traces_to_filter = {
+            'running action': ( attr_num, '/nso-dbg/beam-state/get-metrics')
+    }
+    filtered_traces = set()
+
     with Live(table, auto_refresh=False) as live:
         for l in reader:
             event_type = l[event_num]
@@ -196,39 +222,66 @@ def graph_progress_trace(args, csvreader, capabilities, fieldnames):
             duration = float(l[dur_num]) if l[dur_num] else 0.0
 
             trid = l[trid_num][-12:] if trid_num else ''
-            span = l[span_num] if span_num else ''
-            pspan = l[pspan_num] if pspan_num else ''
+            spid = l[span_num] if span_num else ''
+            pspid = l[pspan_num] if pspan_num else ''
             sid = l[sess_num] if sess_num else ''
             tid = l[tid_num] if tid_num else ''
             msg = l[msg_num] if msg_num else ''
             srv = l[srv_num] if srv_num else ''
             attr = l[attr_num] if attr_num else ''
-            # Can SPAN ID used as key, when available?
-            key = f'{trid}{span}{pspan}{sid}{tid}{srv}{attr}{msg}'
+            # Filter on message names if --filter is specified
+            if filter_messages and msg not in filter_messages:
+                continue
 
-            if begin == 0.0:
-                begin = ts
-            size = ts - begin
+            # Can SPAN ID used as key, when available?
+            key = f'{trid}{spid}{pspid}{sid}{tid}{srv}{attr}{msg}'
+
+            nxt = False
             if event_type == 'start':
-                cid = trid if args.color_trid else tid
-                if cid not in tids_color:
-                    color = Color.from_ansi(color_numbers.pop(0))
-                    tids_color[cid] = color
+                if trid in filtered_traces: continue
+                for m,(a,v) in traces_to_filter.items():
+                    if msg == m and l[a] == v:
+                        filtered_traces.add(trid)
+                        nxt = True
+                        break
+                if nxt: continue
+                if begin == 0.0:
+                    begin = ts
+                size = ts - begin
+                if args.bw:
+                    color = Color.parse("bright_white")
                 else:
-                    color=tids_color[cid]
+                    cid = trid if args.color_trid else tid
+                    if cid not in tids_color:
+                        color = Color.from_ansi(color_numbers.pop(0))
+                        tids_color[cid] = color
+                    else:
+                        color=tids_color[cid]
                 span = Bar(begin=size, end=size, size=size, color=color)
                 desc = Text('', style=Style(color=color))
                 rtid = Text(trid, style=Style(color=color))
                 rtext= Text(f'{msg} {tid}', style=Style(color=color))
                 spans[key] = span, desc
-                table.add_row(rtid, rtext, desc, span)
-            elif event_type == 'stop' and key in spans:
-                span, desc = spans[key]
-                desc.append(f'{duration*1000:0.3f}')
-                span.end = span.end + duration
-                for s, _ in spans.values():
-                    s.size = size
-                span_duration.plain = f'Span {size*1000:0.3f} ms'
+                if not args.show_span_ids:
+                    table.add_row(rtid, rtext, desc, span)
+                else:
+                    table.add_row(rtid, spid, pspid, rtext, desc, span)
+            elif event_type == 'stop':
+                for m,(a,v) in traces_to_filter.items():
+                    if msg == m and l[a] == v:
+                        filtered_traces.remove(trid)
+                        nxt = True
+                        break
+                if nxt: continue
+                if trid in filtered_traces: continue
+                size = ts - begin
+                if key in spans:
+                    span, desc = spans[key]
+                    desc.append(f'{duration:0.3f}')
+                    span.end = span.end + duration
+                    for s, _ in spans.values():
+                        s.size = size
+                    span_duration.plain = f'Span {size:0.3f}'
             else:
                 continue
             if args.follow:
