@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "progress-trace-viewer"
+version = "0.99"
+description = "Command-line tools for viewing and analyzing Cisco NSO progress traces"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+dependencies = [
+    "polars==1.34.0",
+    "rich==14.3.1",
+]
+
+[project.scripts]
+list_longest_spans = "list_longest_spans:main"
+ncs_progress_trace_viewer = "ncs_progress_trace_viewer:main"
+preprocess_progress_trace = "preprocess_progress_trace:main"
+progress_trace_filter = "progress_trace_filter:main"
+progress_trace_statistics = "progress_trace_statistics:main"
+ptrace = "ptrace_script.ptrace:main"
+show_overlap = "show_overlap:main"
+
+[tool.setuptools]
+py-modules = [
+    "list_longest_spans",
+    "ncs_progress_trace_viewer",
+    "preprocess_progress_trace",
+    "progress_trace_filter",
+    "progress_trace_statistics",
+    "show_overlap",
+]
+
+[tool.setuptools.packages.find]
+include = ["ptrace_script"]

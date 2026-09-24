@@ -259,5 +259,8 @@ def main_polars(args):
         with pl.Config(tbl_cols=-1, fmt_str_lengths=100):
             print(result)
 
-if __name__ == '__main__':
+def main():
     main_polars(parseArgs(sys.argv[1:]))
+
+if __name__ == '__main__':
+    main()

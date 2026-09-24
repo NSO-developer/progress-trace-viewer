@@ -24,7 +24,9 @@ def parseArgs(args):
     return parser.parse_args(args)
 
 
-def main(args):
+def main(args=None):
+    if args is None:
+        args = parseArgs(sys.argv[1:])
     pl.Config().set_tbl_rows(200)\
                .set_fmt_str_lengths(100)\
                .set_tbl_cols(20)
@@ -194,4 +196,4 @@ def main(args):
 
 
 if __name__ == '__main__':
-    main(parseArgs(sys.argv[1:]))
+    main()

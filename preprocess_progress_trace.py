@@ -56,7 +56,9 @@ def write_row(writer, row, missing_fieldnames):
             del row[n]
         writer.writerow(row)
 
-def main(args):
+def main(args=None):
+    if args is None:
+        args = parseArgs(sys.argv[1:])
     missing_fieldnames = set()
     try:
         reader = csv.DictReader(open(args.input, 'r'))
@@ -97,4 +99,4 @@ def main(args):
             print(n)
 
 if __name__ == '__main__':
-    main(parseArgs(sys.argv[1:]))
+    main()

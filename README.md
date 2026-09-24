@@ -11,12 +11,33 @@ and capabilities of a trace file.
 
 ## Installation
 
-The tools require Python 3.10 or later and the packages listed in
-`requirements.txt`. Install the dependencies with:
+The tools require Python 3.10 or later. Install the repository directly with
+pip:
 
 ```console
-pip3 install -r requirements.txt
+python3 -m pip install git+https://gitlab.com/nso-developer/progress-trace-viewer.git
 ```
+
+To install a local checkout instead, run:
+
+```console
+python3 -m pip install .
+```
+
+This installs the following commands on `PATH`:
+
+```text
+list_longest_spans
+ncs_progress_trace_viewer
+preprocess_progress_trace
+progress_trace_filter
+progress_trace_statistics
+ptrace
+show_overlap
+```
+
+For an isolated command-line installation, the same repository URL can be used
+with [`pipx`](https://pipx.pypa.io/).
 
 ## Export a progress trace from NSO
 

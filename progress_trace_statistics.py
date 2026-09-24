@@ -214,7 +214,9 @@ def get_statistics(progress_trace, args, datastore=None):
     return duration_grouped_by_message.sort('MESSAGE')
 
 
-def main(args):
+def main(args=None):
+    if args is None:
+        args = parseArgs(sys.argv[1:])
     progress_trace = (pl.scan_csv(args.file)
         .filter(
              # filter out empty rows in case the CSV is not preprocessed
@@ -246,4 +248,4 @@ def main(args):
 
 
 if __name__ == '__main__':
-    main(parseArgs(sys.argv[1:]))
+    main()

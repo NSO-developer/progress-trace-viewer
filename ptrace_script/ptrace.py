@@ -1,10 +1,19 @@
-from calc_events_stats import get_statistics as polars_calc_event_stats
-from filter_trans_id import main_polars as polars_filter_trans_id
-from list_events import main_polars as polars_list_events
-from list_longest_spans import main as polars_list_longest_spans
-from list_root_traces import main as polars_list_root_traces
-from show_overlap import main as polars_show_overlap
-from show_span import main as polars_show_span
+if __package__:
+    from .calc_events_stats import get_statistics as polars_calc_event_stats
+    from .filter_trans_id import main_polars as polars_filter_trans_id
+    from .list_events import main_polars as polars_list_events
+    from .list_longest_spans import main as polars_list_longest_spans
+    from .list_root_traces import main as polars_list_root_traces
+    from .show_overlap import main as polars_show_overlap
+    from .show_span import main as polars_show_span
+else:
+    from calc_events_stats import get_statistics as polars_calc_event_stats
+    from filter_trans_id import main_polars as polars_filter_trans_id
+    from list_events import main_polars as polars_list_events
+    from list_longest_spans import main as polars_list_longest_spans
+    from list_root_traces import main as polars_list_root_traces
+    from show_overlap import main as polars_show_overlap
+    from show_span import main as polars_show_span
 import polars as pl
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 

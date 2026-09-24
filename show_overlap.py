@@ -82,7 +82,9 @@ def process_overlap(args, progress_trace):
             print(f"{ts}  {tid}  {trid:<10}  {m:40}")
 
 
-def main(args):
+def main(args=None):
+    if args is None:
+        args = parseArgs(sys.argv[1:])
     progress_trace = pl.scan_csv(args.file).filter(
                             (pl.col('TIMESTAMP') != '') &
                             (pl.col('DATASTORE') == 'running')
@@ -101,4 +103,4 @@ def main(args):
 
 
 if __name__ == '__main__':
-    main(parseArgs(sys.argv[1:]))
+    main()

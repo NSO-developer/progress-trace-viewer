@@ -289,7 +289,9 @@ def graph_progress_trace(args, csvreader, capabilities, fieldnames):
 
 
 
-def main(args):
+def main(args=None):
+    if args is None:
+        args = parseArgs()
     if args.file is None:
         print("ERROR: No file provided.")
         sys.exit(1)
@@ -321,4 +323,4 @@ def main(args):
         sys.exit(1)
 
 if __name__ == '__main__':
-    main(parseArgs())
+    main()
